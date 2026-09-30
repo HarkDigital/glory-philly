@@ -7,7 +7,9 @@ import { makeBarTop } from '../../kit/bar'
 import { StoryClock } from '../../kit/pace'
 import { whenRevealed } from '../../kit/images'
 import { GEL } from '../../world/World'
-import { makeBottleWall, SECTION_X, WALL_Z, ROW_Y, type BottleWall } from './bottles'
+import { makeBottleWall, LP_X, SECTION_X, WALL_Z, ROW_Y, type BottleWall } from './bottles'
+import { makeBottlesLP, makeSingle, singlesArt, SINGLE_TOP, type Single } from './records'
+import { syncVinylLights } from '../../kit/vinyl'
 import { makeWineTower, type WineTower } from './wine'
 import { makeSlot, SPECS, type CocktailSlot } from './cocktails'
 import { CellarHud, layoutOf, type BeatState } from './hud'
@@ -67,14 +69,14 @@ const SHOTS: [number, Shot][] = [
   [INTL[0] + 2.15 * PG, S(IX - 3, R2, Z, 7.0, 0.1, 0.07, 34, 0.5, 0, 1.3)],
   [INTL[1] - 0.004, S(IX + 3, R2, Z, 7.0, -0.1, 0.07, 34, 0.5, 0, 1.3)],
   // Local: a macro on the two bottles
-  [LOC[0] + 0.012, S(SECTION_X.local, ROW_Y[2] + 1.05, Z, 3.6, -0.2, 0.06, 30, 0.35, 0, 1.5)],
-  [LOC[1] - 0.004, S(SECTION_X.local, ROW_Y[2] + 1.05, Z, 3.2, -0.32, 0.04, 30, 0.35, 0, 1.5)],
+  [LOC[0] + 0.012, S(SECTION_X.local - 1.05, ROW_Y[2] + 1.05, Z, 3.5, -0.16, 0.06, 30, 0.35, 0, 1.5)],
+  [LOC[1] - 0.004, S(SECTION_X.local + 0.35, ROW_Y[2] + 1.2, Z, 5.0, -0.3, 0.05, 30, 0.35, 0, 1.35)],
   // wine: the tower pours
   [WINE_T[0] + 0.014, S(WINE_AT.x, 1.5, WINE_AT.z, 7.2, -0.14, 0.1, 32, 0.36, 0, 1.55)],
   [WINE_T[1] - 0.012, S(WINE_AT.x, 1.4, WINE_AT.z, 6.5, 0.08, 0.08, 32, 0.36, 0, 1.55)],
   // cocktails: a slow orbit across the seven
-  [COCK[0] + 0.008, S(COCK_AT.x, 0.62, COCK_AT.z, 3.3, -0.14, 0.1, 30, 0.3, 0, 1.2)],
-  [OUT - 0.004, S(COCK_AT.x, 0.62, COCK_AT.z, 3.1, 0.14, 0.08, 30, 0.3, 0, 1.2)],
+  [COCK[0] + 0.008, S(COCK_AT.x, 0.62, COCK_AT.z, 3.3, -0.14, 0.1, 30, 0.38, 0, 1.2)],
+  [OUT - 0.004, S(COCK_AT.x, 0.62, COCK_AT.z, 3.1, 0.14, 0.08, 30, 0.38, 0, 1.2)],
   [1.0, S(COCK_AT.x, 0.66, COCK_AT.z, 2.3, 0.2, 0.06, 30, 0.22, 0, 1.2)],
 ]
 
@@ -88,7 +90,7 @@ const cocktailH = (pos: number) => {
 }
 
 const _shot = S(0, 0, 0, 1, 0, 0, 30, 0)
-function shotAt(q: number, out: Shot) {
+function shotAt(q: number, out: Shot, tall = false) {
   let i = 0
   while (i < SHOTS.length - 2 && q > SHOTS[i + 1][0]) i++
   const [t0, a] = SHOTS[i]
@@ -98,9 +100,11 @@ function shotAt(q: number, out: Shot) {
   // cocktails: frame the glass on the bar (a tall collins needs more room)
   const c = smoothstep(COCK[0] - 0.012, COCK[0] + 0.004, q)
   if (c > 0) {
-    const h = cocktailH(cocktailPos(q))
+    // …and the 7" single standing on its easel beside it (behind-right)
+    const h = Math.max(cocktailH(cocktailPos(q)), SINGLE_TOP + 0.05)
+    out.x += c * (tall ? 0.3 : 0.5)
     out.y = lerp(out.y, 0.08 + h * 0.5, c)
-    out.d = lerp(out.d, (1.7 + h * 1.75) * (out.d / 3.2), c)
+    out.d = lerp(out.d, (1.2 + h * 1.75) * (out.d / 3.2), c)
   }
   return out
 }
@@ -114,6 +118,8 @@ export default function cellar(): Chapter {
   let wall: BottleWall
   let tower: WineTower
   let slots: CocktailSlot[] = []
+  let singles: Single[] = []
+  let tallNow = false
   let q = 0
   const tmp = new THREE.Vector3()
   const state: BeatState = { beat: null, page: 0, cocktail: 0, head: false }
@@ -177,6 +183,19 @@ export default function cellar(): Chapter {
       const iceMatI = iceMat.clone()
       slots = [makeSlot(glassMat, iceMat, iceMatI, 5), makeSlot(glassMat, iceMat, iceMatI, 9)]
       for (const s of slots) group.add(s.group)
+      // a 7" single per slot, beside the glass (not on its turntable)
+      const art = singlesArt(ctx.mobile)
+      const easelSteel = new THREE.MeshStandardMaterial({ color: '#16110e', metalness: 0.7, roughness: 0.38 })
+      singles = [makeSingle(art, easelSteel), makeSingle(art, easelSteel)]
+      for (const sg of singles) group.add(sg.group)
+      await nextFrame()
+
+      // the "Bottles" LP leaning on the Local shelf, its back (the whole list) to the room
+      const lp = makeBottlesLP(ctx.mobile)
+      lp.group.scale.setScalar(2)
+      lp.group.position.set(LP_X, ROW_Y[2], WALL_Z - 0.05)
+      lp.group.rotation.set(0.25, Math.PI - 0.1, 0, 'YXZ')
+      group.add(lp.group)
       slots[0].show(0)
       slots[1].show(1)
 
@@ -277,7 +296,17 @@ export default function cellar(): Chapter {
         slot.group.rotation.y = -0.35 + 0.5 * clamp(within, -0.2, 1.2) + (reduced ? 0 : Math.sin(t * 0.35 + k) * 0.05)
         slot.group.rotation.z = off * 0.04 + (1 - land) * 0
         slot.tick(reduced ? 1.3 : t)
+        // the single: arrives with the glass, the record rises out of its
+        // sleeve once the glass has landed, turns slowly, sinks back before it leaves
+        const sg = singles[s]
+        sg.group.visible = true
+        sg.show(k)
+        sg.group.position.set(slot.group.position.x + (tallNow ? 0.5 : 1.0), 0, slot.group.position.z + (tallNow ? -0.7 : -0.4))
+        sg.group.rotation.y = tallNow ? -0.12 : -0.3
+        const out = smoothstep(0.08, 0.4, within) * (1 - smoothstep(0.76, 0.92, within))
+        sg.set(out, -within * 1.4 - t * 0.35)
       }
+      for (let s = 0; s < 2; s++) if (!slots[s].group.visible) singles[s].group.visible = false
 
       // ---- light ----
       const w = ctx.world.params
@@ -299,7 +328,9 @@ export default function cellar(): Chapter {
       shotAt(q, _shot)
       const sub = tmp.set(_shot.x, _shot.y, _shot.z)
       const fin = smoothstep(0.93, 0.99, local)
-      w.spot = (inBottles ? 0.75 : cocktails ? 1.05 : 0.95) * (1 - 0.45 * fin)
+      // cream sleeves bloom under a hot key: keep it ≈ 0.5–0.7 near the vinyl
+      const nearLP = q > LOC[0] - 0.01 && q < LOC[1] + 0.004
+      w.spot = (nearLP ? 0.5 : inBottles ? 0.75 : cocktails ? 0.72 : 0.95) * (1 - 0.45 * fin)
       w.spotColor = GEL.tungsten
       w.spotAngle = inBottles ? 0.5 : 0.36
       w.spotPenumbra = 0.7
@@ -312,6 +343,7 @@ export default function cellar(): Chapter {
       w.rimBColor = GEL.cream
       w.rimBDir.set(0.9, 0.35, -1)
       wall.setBacklight(inBottles ? 0.95 : 0.7)
+      syncVinylLights(ctx.world)
       // no bright finale into the cut: the product-shot card dims as we push in
       if (cards[0]) ((cards[0].material as THREE.MeshBasicMaterial).color.setScalar(0.9 * (1 - 0.55 * smoothstep(0.93, 0.99, local))))
 
@@ -320,9 +352,10 @@ export default function cellar(): Chapter {
     },
 
     camera(local: number, frame: Frame, out: CameraPose) {
-      const s = shotAt(Number.isFinite(q) ? q : local, _shot)
       const layout = layoutOf(frame.width, frame.height)
       const tall = layout === 'phone' || layout === 'tablet'
+      tallNow = tall
+      const s = shotAt(Number.isFinite(q) ? q : local, _shot, tall)
       const aspect = frame.width / Math.max(1, frame.height)
       let d = s.d
       let fov = s.fov
@@ -334,9 +367,13 @@ export default function cellar(): Chapter {
         sx = 0
         // the sheet takes the bottom ~45%: the subject sits in the top half
         sy = layout === 'phone' ? 0.42 : 0.36
+      } else if (layout === 'wide') {
+        // squarer screens (1024×768): the card is a bigger share of the width
+        sx += clamp((1.6 - aspect) * 0.4, 0, 0.14) * smoothstep(COCK[0] - 0.012, COCK[0] + 0.004, Number.isFinite(q) ? q : local)
       } else if (layout === 'short') {
         d *= 1.08
-        sx *= 0.9
+        // the compact card takes ~half the width: push the cocktail shots right
+        sx = sx * 0.9 + 0.2 * smoothstep(COCK[0] - 0.012, COCK[0] + 0.004, Number.isFinite(q) ? q : local)
       }
       // the cut in: a fast dolly along the wall
       const inT = 1 - smoothstep(0, 0.055, local)

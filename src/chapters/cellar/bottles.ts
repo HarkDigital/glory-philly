@@ -25,6 +25,8 @@ export const WALL_Z = -4
 /** shelf bases, top → bottom */
 export const ROW_Y = [6.9, 4.3, 1.0]
 export const SECTION_X = { american: -7.7, international: 0, local: 8 }
+/** where the "Bottles" LP leans on the Local shelf */
+export const LP_X = SECTION_X.local + 0.9
 
 type Kind = 'cork' | 'stubby' | 'magnum' | 'jero'
 const KIND_SCALE: Record<Kind, number> = { cork: 1, stubby: 1, magnum: 1.26, jero: 1.62 }
@@ -309,7 +311,9 @@ export async function makeBottleWall(mobile: boolean): Promise<BottleWall> {
   // LOCAL: the two bottles, bottom shelf
   {
     const b = byId('local')
-    sectionW.local = layRow(b, SECTION_X.local, ROW_Y[2], 'local', 0, 4) + 1.4
+    layRow(b, SECTION_X.local - 1.05, ROW_Y[2], 'local', 0, 4)
+    // room on the right for the "Bottles" LP (index.ts) leaning on the backlight
+    sectionW.local = 3.7
     rowCentres.local = [0, 1, 2].map(ri => new THREE.Vector3(SECTION_X.local, ROW_Y[ri] + 0.95, WALL_Z))
   }
   // BACK BAR fillers: unlabelled silhouettes behind the wine tower and cocktails

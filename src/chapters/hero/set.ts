@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { makeBarTop, makeBrickWall, makeDripTray, makeFaucet, stainless, woodMaps } from '../../kit/bar'
 import { BRAND } from '../../content'
+import { catNo, coverTexture, drawRoundel, makeRecord, makeSleeve, makeTurntable, onFonts, type Record, type Sleeve, type Turntable } from '../../kit/vinyl'
 
 /*
  * HERO SET — Glory after dark, 126 Chestnut Street: the oiled bar, a
@@ -25,19 +26,15 @@ export const SET = {
 }
 
 /**
- * VINYL HOOK — where the turntable goes (src/kit/vinyl/, being built by the
- * vinyl agent). The deck stands on the bar to the LEFT of the tap column, so
- * the landing frame reads copy · deck · glass + faucet, the pour camera (from
- * the right) sees it spinning behind the glass, and the payoff keeps it in the
- * back left. Add the deck to `set.deck` (a Group already placed here); its
- * origin = the deck's footprint centre on the bar top (y = 0), front facing +z.
- * Scale: the tulip glass is 2.42 units tall (~18 cm), so 1 unit ≈ 7.4 cm — a
- * real 45 cm deck is ~6 units wide; `scale` lets it read as a smaller prop.
+ * THE DECK — a walnut turntable (src/kit/vinyl) on the back bar, LEFT of the
+ * tap column, spinning a red-label Glory record; a sleeve leans on the brick
+ * behind it. Real size against the glass: the tulip is 2.42 units (~18 cm),
+ * so 1 unit ≈ 7.4 cm and the kit's unit (a 12" sleeve, 31.5 cm) is ×4.26.
  */
 export const DECK_ANCHOR = {
-  position: new THREE.Vector3(-3.3, 0, -0.75),
-  rotationY: 0.28,
-  scale: 1,
+  position: new THREE.Vector3(-2.85, 0, -1.95),
+  rotationY: 0.2,
+  scale: 31.5 / 7.4,
   cmPerUnit: 7.4,
 }
 
@@ -98,9 +95,26 @@ function streetTexture(): THREE.CanvasTexture {
   return t
 }
 
-/** A cream coaster disc with the red "G" roundel printed on it. */
-function roundelCoaster(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial } {
-  const mat = new THREE.MeshStandardMaterial({ color: '#b8b0a2', roughness: 0.9, envMapIntensity: 0.3 })
+/** A cream coaster printed with the red-ring "G" roundel (the site icon), drawn crisp. */
+function roundelCoaster(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; tex: THREE.CanvasTexture } {
+  const n = 512
+  const cv = document.createElement('canvas')
+  cv.width = cv.height = n
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 8
+  const draw = () => {
+    const g = cv.getContext('2d')!
+    g.clearRect(0, 0, n, n)
+    // pulp board, then the roundel filling it (cream disc, red ring, heavy G)
+    g.fillStyle = '#efe7d6'
+    g.fillRect(0, 0, n, n)
+    drawRoundel(g, n / 2, n / 2, n * 0.47, { disc: '#f3ecdc' })
+    tex.needsUpdate = true
+  }
+  draw()
+  void onFonts(draw)
+  const mat = new THREE.MeshStandardMaterial({ map: tex, color: '#cfc7b7', roughness: 0.9, envMapIntensity: 0.3 })
   const edge = new THREE.MeshStandardMaterial({ color: '#b8ad98', roughness: 0.92 })
   const geo = new THREE.CylinderGeometry(0.82, 0.82, 0.035, 64, 1, true)
   geo.translate(0, 0.0175, 0)
@@ -112,23 +126,16 @@ function roundelCoaster(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial }
   face.position.y = 0.035
   face.receiveShadow = true
   mesh.add(face)
-  new THREE.TextureLoader().load(BRAND.roundel, tex => {
-    tex.colorSpace = THREE.SRGBColorSpace
-    tex.anisotropy = 8
-    // the png is a white square with the ring: crop in to the ring's disc
-    tex.repeat.set(0.94, 0.94)
-    tex.offset.set(0.03, 0.03)
-    mat.map = tex
-    mat.color.set('#c9c0b0')
-    mat.needsUpdate = true
-  })
-  return { mesh, mat }
+  return { mesh, mat, tex }
 }
 
 export interface HeroSet {
   group: THREE.Group
-  /** VINYL HOOK: the turntable's anchor (see DECK_ANCHOR) — empty until the vinyl kit lands */
+  /** the turntable's anchor (DECK_ANCHOR) */
   deck: THREE.Group
+  tt: Turntable
+  record: Record
+  sleeve: Sleeve
   faucet: ReturnType<typeof makeFaucet>
   coaster: THREE.Mesh
   wash: THREE.SpotLight
@@ -141,8 +148,10 @@ export function buildSet(mobile: boolean): HeroSet {
   const disposables: { dispose(): void }[] = []
 
   // THE BAR: a long oiled top and a dark panelled front
-  const bar = makeBarTop({ length: 22, depth: 3.4, thickness: 0.14 })
-  bar.position.set(1, 0, 0)
+  // the top runs back to the brick (the deck and a sleeve stand at the back)
+  const barBack = SET.wallZ + 0.02
+  const bar = makeBarTop({ length: 22, depth: 1.7 - barBack, thickness: 0.14 })
+  bar.position.set(1, 0, (1.7 + barBack) / 2)
   group.add(bar)
   const { map } = woodMaps()
   const front = new THREE.Mesh(
@@ -246,18 +255,34 @@ export function buildSet(mobile: boolean): HeroSet {
   wash.target.position.set(-3, 1.5, SET.wallZ)
   group.add(wash, wash.target)
 
-  // VINYL HOOK: the deck's anchor (empty for now)
+  // THE DECK: a walnut turntable spinning the red-label Glory record
   const deck = new THREE.Group()
-  deck.name = 'hero-deck-anchor'
+  deck.name = 'hero-deck'
   deck.position.copy(DECK_ANCHOR.position)
   deck.rotation.y = DECK_ANCHOR.rotationY
   deck.scale.setScalar(DECK_ANCHOR.scale)
   group.add(deck)
+  const tt = makeTurntable({ finish: 'walnut' })
+  const record = makeRecord({ label: { title: 'This Must Be the Place', sub: BRAND.name, side: 'SIDE A', cat: catNo(1), paper: 'red' } })
+  tt.setRecord(record)
+  deck.add(tt.group)
+  disposables.push(tt)
+  // its sleeve, leaning on the brick behind (the wall sign photo, the house cover)
+  const sleeve = makeSleeve({
+    front: coverTexture({ title: BRAND.short, sub: BRAND.motto, kicker: 'Glory Records', cat: catNo(1), photoUrl: 'photos/wall-sign.webp', focus: [0.3, 0.3] }),
+  })
+  sleeve.group.scale.setScalar(DECK_ANCHOR.scale)
+  sleeve.group.position.set(-4.9, 0, SET.wallZ + 0.5)
+  sleeve.group.rotation.set(-0.11, 0.06, 0)
+  group.add(sleeve.group)
 
   void mobile
   return {
     group,
     deck,
+    tt,
+    record,
+    sleeve,
     faucet,
     coaster,
     wash,

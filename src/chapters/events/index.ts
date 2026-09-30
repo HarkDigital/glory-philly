@@ -10,6 +10,8 @@ import { whenRevealed } from '../../kit/images'
 import { GEL } from '../../world/World'
 import { makeBanquetTable, type BanquetTable } from './table'
 import { makePrints, loadPhoto, type PrintStack } from './prints'
+import { makeDeck, GATEFOLD, K, type Deck } from './deck'
+import { syncVinylLights } from '../../kit/vinyl'
 
 /*
  * EVENTS — "The Back Room".
@@ -17,19 +19,23 @@ import { makePrints, loadPhoto, type PrintStack } from './prints'
  * One long banquet table in Glory's dining room, set for a party: plates and
  * black napkins, stemware, bentwood chairs, bouquets, and three-taper
  * candelabra down a linen runner, flickering off into the dark under the
- * string lights. At the head of the table lies a stack of lab prints: the
- * dining room, then the site's seven party photographs.
+ * string lights. A party needs a record: across the head of the table a
+ * sideboard carries a black deck playing a Glory record at 33⅓, a few Glory
+ * sleeves leaning in a rack beside it. On the table lies the photo "album":
+ * an open gatefold LP with a stack of lab prints on it — the dining room,
+ * then the site's seven party photographs, counted like a tracklist.
  *
- *   0.00–0.06  cut in: a low dolly down the length of the table
+ *   0.00–0.06  cut in: a dolly over the deck, down the length of the table
  *   0.07–0.72  "Book an Event / Parties & Corporate Events" + the two body
  *              lines (copy column left; on top when stacked). Landing 0.1.
  *   0.13–0.23  the camera cranes up over the head of the table to the prints
  *   0.22–0.70  the album: the top print (the dining room) lifts and turns up
  *              to the camera; each next one follows while the last is laid on
- *              the pile — 1 / 7 … 7 / 7. Paced by a StoryClock (≤ 1.1 prints
+ *              the gatefold's other panel — Track 1 / 7 … 7 / 7. Paced by a StoryClock (≤ 1.1 prints
  *              a second, each ≥ 0.9 s), cross-fades in place under reduced
  *              motion.
- *   0.71–0.80  the camera rises to a high three-quarter view of the whole table
+ *   0.71–0.80  the camera rises to a high three-quarter view: the deck and the
+ *              album bottom left, the whole table running up behind the card
  *   0.78–0.96  the inquiry: a printed card listing the form's fields, with
  *              Event Inquiry Form (a pre-filled email to Dave) and Upcoming
  *              Events, and the note for parties of more than 10.
@@ -63,8 +69,9 @@ const CARD_OUT = [0.95, 0.975] as const
 
 // ---- the head of the table
 const AT = {
-  stack: new THREE.Vector3(0.62, 0, 1.75),
-  pile: new THREE.Vector3(-0.74, 0, 1.62),
+  // the prints lie on the open gatefold: the stack on its right panel, the pile on its left
+  stack: new THREE.Vector3(GATEFOLD.spine + K / 2, GATEFOLD.t, GATEFOLD.z),
+  pile: new THREE.Vector3(GATEFOLD.spine - K / 2, GATEFOLD.t, GATEFOLD.z - 0.04),
   present: new THREE.Vector3(-0.02, 0.5, 2.0),
 }
 
@@ -116,6 +123,7 @@ export default function events(): Chapter {
   const group = new THREE.Group()
   let table: BanquetTable
   let prints: PrintStack
+  let deck: Deck
   let stage: HTMLElement
   let root: HTMLElement
   let copy: HTMLElement
@@ -176,6 +184,9 @@ export default function events(): Chapter {
       table = makeBanquetTable(mobile)
       group.add(table.group)
       await nextFrame()
+      deck = makeDeck(mobile)
+      group.add(deck.group)
+      await nextFrame()
       prints = makePrints(
         URLS.map(url => ({ url, aspect: ASPECT[url] ?? 1 })),
         AT,
@@ -203,6 +214,7 @@ export default function events(): Chapter {
       for (const b of EVENTS.body) el('p', 'hud-body', b, body)
 
       count = el('div', 'ev-count', undefined, root)
+      count.append(document.createTextNode(`${EVENTS_UI.track} `))
       countN = el('b', '', '1', count)
       count.append(document.createTextNode(` / ${NE}`))
 
@@ -279,6 +291,7 @@ export default function events(): Chapter {
       // ---- candles: gentle, time-based flicker (calmer under reduced motion)
       const amp = reduced ? 0.35 : 1
       table.update(frame.time, amp)
+      deck.update(frame)
       const t = frame.time
       table.lights.forEach((L, i) => {
         const fl = 1 + amp * (0.05 * Math.sin(t * 4.1 + i * 2.3) + 0.03 * Math.sin(t * 7.3 + i * 5.1))
@@ -309,7 +322,7 @@ export default function events(): Chapter {
         _p.project(ctx.camera)
         const x = (_p.x * 0.5 + 0.5) * W
         const y = (-_p.y * 0.5 + 0.5) * H
-        if (Number.isFinite(x) && Number.isFinite(y)) count.style.transform = `translate3d(${(x - 34).toFixed(1)}px, ${y.toFixed(1)}px, 0)`
+        if (Number.isFinite(x) && Number.isFinite(y)) count.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) translateX(-50%)`
       }
       reveal(count, cv, 0)
 
@@ -329,11 +342,14 @@ export default function events(): Chapter {
       w.cycColor = '#5a2a18'
       w.cycX = stacked(W, H) ? 0 : 0.2
       w.cycY = 0.1
-      w.spot = lerp(0.3, 0.26, room) - 0.08 * smoothstep(TO_PRINTS[0], TO_PRINTS[1], local) * (1 - room)
+      // the key: over the deck and the album at the head (intro), onto the prints (album), the whole head (room)
+      const onPrints = smoothstep(TO_PRINTS[0], TO_PRINTS[1], local) * (1 - room)
+      const intro = 1 - Math.max(onPrints, room)
+      w.spot = 0.34 * intro + 0.22 * onPrints + 0.3 * room
       w.spotColor = GEL.tungsten
-      w.spotPos.set(lerp(1.4, 2.5, room), lerp(6.5, 9.5, room), lerp(4.6, 3, room))
-      w.spotAt.set(lerp(0.0, -0.4, room), 0.2, lerp(1.7, -1.5, room))
-      w.spotAngle = lerp(0.36, 0.55, room)
+      w.spotPos.set(2.6 * intro + 1.4 * onPrints + 3.2 * room, 7.5 * intro + 6.5 * onPrints + 8.5 * room, 8.2 * intro + 4.6 * onPrints + 7.5 * room)
+      w.spotAt.set(0.9 * intro + 0.0 * onPrints + 0.6 * room, 0.2, 3.2 * intro + 1.7 * onPrints + 2.4 * room)
+      w.spotAngle = 0.5 * intro + 0.36 * onPrints + 0.5 * room
       w.spotPenumbra = 0.7
       w.rimA = 0.9
       w.rimAColor = GEL.candle
@@ -343,6 +359,8 @@ export default function events(): Chapter {
       w.rimBDir.set(0.9, 0.3, -1)
       w.fill = 0.06
       w.env = 0.85
+
+      syncVinylLights(ctx.world)
 
       const p = ctx.post.params
       p.beer = 0.35
@@ -362,12 +380,13 @@ export default function events(): Chapter {
       // A: low at the head of the table, looking down its length
       const dolly = calm ? 0.5 : smoothstep(0, 0.2, local)
       if (st) {
-        A.pos.set(0.2, 1.55, lerp(7.4, 6.8, dolly))
-        A.tgt.set(-0.05, 0.62, -6)
-        A.fov = 52
+        A.pos.set(2.2, 3.0, lerp(10.9, 10.4, dolly))
+        A.tgt.set(-0.2, 1.3, -3)
+        A.fov = 50
       } else {
-        A.pos.set(lerp(0.55, 0.35, dolly), 1.3, lerp(5.9, 5.3, dolly))
-        A.tgt.set(-1.3, 0.55, -6)
+        // over the deck on the sideboard, down the length of the table
+        A.pos.set(lerp(2.25, 2.05, dolly), 2.5, lerp(9.3, 8.8, dolly))
+        A.tgt.set(-0.6, 0.25, -3)
         A.fov = sl ? 40 : 36
       }
 
@@ -392,15 +411,16 @@ export default function events(): Chapter {
 
       // C: high three-quarter view of the whole table for the inquiry
       if (st) {
-        Cp.pos.set(1.6, 4.4, 7.2)
-        Cp.tgt.set(-0.2, 0.2, -5)
+        Cp.pos.set(3.4, 5.4, 12.5)
+        Cp.tgt.set(0.2, -0.6, -2)
         Cp.fov = 50
       } else {
-        Cp.pos.set(3.4, 3.7, 5.6)
-        Cp.tgt.set(-1.1, -0.1, -5.5)
-        Cp.fov = sl ? 42 : 36
+        // high three-quarter: the deck and the album bottom left, the table running up behind the card
+        Cp.pos.set(4.35, 4.6, 10.1)
+        Cp.tgt.set(-0.25, -0.3, -3.9)
+        Cp.fov = sl ? 40 : 36
       }
-      if (!calm) Cp.pos.x -= 0.4 * smoothstep(TO_ROOM[1], 1, local)
+      if (!calm) Cp.pos.x -= 0.3 * smoothstep(TO_ROOM[1], 1, local)
 
       const ab = smoothstep(TO_PRINTS[0], TO_PRINTS[1], local)
       const bc = smoothstep(TO_ROOM[0], TO_ROOM[1], local)

@@ -1,28 +1,33 @@
 import * as THREE from 'three'
 import type { Chapter, ChapterContext, Frame, CameraPose } from '../../core/types'
 import { el, rise, setRise } from '../../core/dom'
-import { ease, lerp, segment, smoothstep, damp } from '../../core/math'
+import { ease, lerp, segment, smoothstep } from '../../core/math'
 import { nextFrame } from '../../core/yield'
-import { PEOPLE, SECTIONS, MASCOT } from '../../content'
+import { PEOPLE, SECTIONS, MASCOT, PEOPLE_UI } from '../../content'
 import { makeGlass, BEERS, type Glass } from '../../kit/beer'
 import { whenRevealed } from '../../kit/images'
 import { StoryClock } from '../../kit/pace'
+import { labelTexture, catNo, syncVinylLights, type PaperName } from '../../kit/vinyl'
 import { GEL } from '../../world/World'
-import { makeWall, makeFramed, makeLedge, FRAME_X, FRAME_Y, LAMP_ABOVE, type Framed } from './wall'
-import { loadPhoto } from './print'
+import { makeWall, makeDisplay, makeLedge, FRAME_X, RAIL_Y, SLEEVE_S, type Display } from './wall'
+import { portraitCover, type PortraitCover } from './cover'
 import './people.css'
 
 /*
  * THE CREW — Resonance's "Liner Notes" became the wall of the bar.
  *
- * Three black-and-white portraits hang as framed silver-gelatin prints on
- * Glory's exposed brick, each under a brass picture light, with a pint of
- * stout on the ledge below. The camera glides from frame to frame (paced by a
- * StoryClock, never faster than ~0.5 s a move) and each person's name, role
- * and bio sit in a panel beside the print (phones: the print on top, the bio
- * below). A bio that can't fit at once (small phones, short landscape) is
- * set in pages — whole sentences, packed by measurement — that take turns in
- * the panel while the print holds.
+ * The three people are ALBUM COVERS: 12" sleeves standing in record-store
+ * "now playing" displays on Glory's exposed brick (a black steel rail with a
+ * lip), each black-and-white portrait the cover photo with the name and role
+ * in the cream band, each record half out of its sleeve showing its label
+ * (name, role, GLY-051…053), a brass picture light above; The Glorious
+ * Archibald is a 7" single between Kevin and Pier; a pint of stout stands on
+ * the ledge below. The camera glides from display to display (a StoryClock,
+ * never faster than ~0.5 s a move); the record in focus eases a little
+ * further out of its sleeve. Each bio is that record's LINER NOTES: a panel
+ * beside the display (phones: the display on top, the notes below). Notes
+ * that can't fit at once (small phones, short landscape) are set in pages —
+ * whole sentences, packed by measurement — that take turns in the panel.
  *
  *   0.00–0.17  in-beat → the wall: a slow dolly onto all three frames;
  *              "About / The people behind the bar." (intro 0.07)
@@ -32,15 +37,17 @@ import './people.css'
  *   0.895–1.00 out-beat: the camera cranes down to the stout on the ledge
  *              (post beer → 1, the pour into the Back Room is a stout)
  *
- * Portrait photos are shown as shot: aspect kept (cover-cropped if ever
- * mismatched, never stretched), no effects on the faces, only the lamp's
- * gentle falloff and a glass that reflects the studio strips while the
- * camera moves.
+ * Portraits are never stretched: each cover is cover-cropped once at a
+ * per-portrait focus that keeps the whole face clear of the header and the
+ * band (cover.ts); the sleeves' ring wear is kept faint so nothing marks a
+ * face.
  */
 
-/** image aspects (w/h) of the portrait files, so frames can be built before the photos arrive */
-const ASPECT: Record<string, number> = { dave: 571 / 688, kevin: 800 / 1200, pier: 480 / 600 }
-const MASCOT_ASPECT = 517 / 640
+/** cover crop focus per portrait (0..1 of the spare height): hair to chin in the photo area */
+const FOCUS: Record<string, [number, number]> = { dave: [0.5, 0.56], kevin: [0.5, 0.11], pier: [0.45, 0.09] }
+const LABEL_PAPER: PaperName[] = ['cream', 'red', 'amber']
+/** the record's centre, right of the sleeve's centre (sleeve units): resting .. in focus */
+const OUT: [number, number] = [0.57, 0.66]
 
 /** glide windows between poses (q = time-paced local) */
 const GLIDES: [number, number][] = [
@@ -85,7 +92,7 @@ interface Card {
 interface Pose {
   pos: THREE.Vector3
   tgt: THREE.Vector3
-  /** picture-light levels for the three prints */
+  /** picture-light levels for the three displays */
   lamps: [number, number, number]
 }
 
@@ -95,10 +102,10 @@ export default function create(): Chapter {
   const group = new THREE.Group()
   const clock = new StoryClock({ rate: 0.12 })
   let q = 0
-  let reduced = false
 
-  const frames: Framed[] = []
-  let mascot: Framed
+  const displays: Display[] = []
+  const covers: PortraitCover[] = []
+  let single: Display
   let pint: Glass
 
   // DOM
@@ -216,26 +223,35 @@ export default function create(): Chapter {
   function buildPoses() {
     const { W, H, safeTop, safeBottom, gutter } = L
     const fov = L.portrait ? 34 : 30
-    // the wall: all three frames (and the ledge) above the headline
-    const wideTop = 4.25
+    // the wall: all three displays (and the ledge) above the headline
+    const d0 = displays[0]
+    const d2 = displays[2]
+    const wideTop = RAIL_Y + d0.top + 0.15
     const wideBot = -0.25
+    const x0 = FRAME_X[0] + d0.left - 0.2
+    const x1 = FRAME_X[2] + d2.right + 0.2
     const y1 = Math.max(safeTop + 120, L.headTop - 14)
-    // (portrait: Kevin and the bulldog whole, Dave and Pier cut by the edges)
-    const wideW = L.portrait ? 8.4 : FRAME_X[2] - FRAME_X[0] + 2.7
-    fit(poses.wide, FRAME_X[1] + (L.portrait ? 0.6 : 0), (wideTop + wideBot) / 2, wideW, wideTop - wideBot, 0, gutter, safeTop, W - gutter, y1, L.portrait ? 1.0 : 0.96, fov, -0.02, 0.03)
+    // (portrait: Kevin's display and the single whole, Dave and Pier cut by the edges)
+    const kc = FRAME_X[1] + (displays[1].left + displays[1].right) / 2
+    const wideW = L.portrait ? 5.4 : x1 - x0
+    const wideX = L.portrait ? kc + 0.8 : (x0 + x1) / 2
+    const wb = L.portrait ? RAIL_Y - 0.9 : wideBot
+    fit(poses.wide, wideX, (wideTop + wb) / 2, wideW, wideTop - wb, 0, gutter, safeTop, W - gutter, y1, L.portrait ? 1.0 : 0.96, fov, -0.02, 0.03)
     poses.wide.lamps = [0.8, 0.8, 0.8]
-    // each print: beside its panel (desktop) or above it (portrait)
+    // each display: beside its liner notes (desktop) or above them (portrait)
     for (let i = 0; i < 3; i++) {
-      const f = frames[i]
+      const d = displays[i]
       const c = cards[i]
-      const bh = f.height + LAMP_ABOVE + 0.3
-      const cy = FRAME_Y + (LAMP_ABOVE + 0.2) / 2
+      const bw = d.right - d.left + 0.25
+      const bh = d.top - d.bottom + 0.25
+      const cx = FRAME_X[i] + (d.left + d.right) / 2
+      const cy = RAIL_Y + (d.top + d.bottom) / 2
       if (L.portrait) {
         const bot = Math.max(safeTop + 110, c.top - 14)
-        fit(poses.p[i], FRAME_X[i], cy, f.width + 0.3, bh, 0.05, gutter, safeTop + 2, W - gutter, bot, 0.94, fov, 0.035, 0.02)
+        fit(poses.p[i], cx, cy, bw, bh, 0.1, gutter, safeTop + 2, W - gutter, bot, 0.96, fov, 0.035, 0.02)
       } else {
         const right = Math.max(gutter + 160, c.left - 28)
-        fit(poses.p[i], FRAME_X[i], cy, f.width + 0.3, bh, 0.05, gutter, safeTop, right, H - safeBottom, 0.9, fov, 0.05, 0.03)
+        fit(poses.p[i], cx, cy, bw, bh, 0.1, gutter, safeTop, right, H - safeBottom, 0.92, fov, 0.05, 0.03)
       }
       poses.p[i].lamps = [0.3, 0.3, 0.3]
       poses.p[i].lamps[i] = 1
@@ -311,8 +327,9 @@ export default function create(): Chapter {
     PEOPLE.forEach((p, i) => {
       const root = el('article', 'pp-card hud-panel', undefined, side)
       const meta = el('p', 'pp-meta', undefined, root)
-      el('span', 'pp-no', `${String(i + 1).padStart(2, '0')} / ${String(PEOPLE.length).padStart(2, '0')}`, meta)
-      const role = rise(el('span', 'pp-role', undefined, meta), p.role)
+      el('span', 'pp-notes', PEOPLE_UI.notes, meta)
+      el('span', 'pp-no', catNo(51 + i), meta)
+      const role = rise(el('p', 'pp-role', undefined, root), p.role)
       const name = rise(el('h3', 'pp-name', undefined, root), p.name)
       el('div', 'pp-rule', undefined, root)
       const bio = el('div', 'pp-bio', undefined, root)
@@ -366,7 +383,6 @@ export default function create(): Chapter {
     busy: () => clock.busy,
 
     async init(ctx: ChapterContext) {
-      reduced = ctx.reducedMotion
       buildDom(ctx.stage)
 
       const wall = makeWall(64, 40)
@@ -374,16 +390,30 @@ export default function create(): Chapter {
       group.add(wall)
       await nextFrame()
 
+      // the three albums: portrait covers, labels, rails, picture lights
       PEOPLE.forEach((p, i) => {
-        const f = makeFramed({ aspect: ASPECT[p.id] ?? 0.8, seed: i })
-        f.group.position.set(FRAME_X[i], FRAME_Y, 0)
-        group.add(f.group)
-        frames.push(f)
+        const cover = portraitCover({ title: p.name, kicker: p.role, cat: catNo(51 + i), paper: 'cream', focus: FOCUS[p.id] ?? [0.5, 0.2] }, p.photo)
+        covers.push(cover)
+        const label = labelTexture({ title: p.name, sub: p.role, side: 'SIDE A', cat: catNo(51 + i), paper: LABEL_PAPER[i] })
+        const d = makeDisplay({ front: cover.texture, label, scale: SLEEVE_S, out: OUT[1], seed: i })
+        d.group.position.set(FRAME_X[i], RAIL_Y, 0)
+        group.add(d.group)
+        displays.push(d)
       })
-      mascot = makeFramed({ aspect: MASCOT_ASPECT, printH: 0.78, mat: 0.13, mold: 0.06, lamp: false, seed: 3 })
-      mascot.group.position.set((FRAME_X[1] + FRAME_X[2]) / 2, 3.55, 0)
-      mascot.group.rotation.z = -0.012
-      group.add(mascot.group)
+      await nextFrame()
+      // the house mascot as a 7" single (decorative)
+      const mCover = portraitCover({ title: MASCOT.name, cat: catNo(54), paper: 'stout' }, MASCOT.photo, 512)
+      covers.push(mCover)
+      single = makeDisplay({
+        front: mCover.texture,
+        label: labelTexture({ title: MASCOT.name, seven: true, side: 'SIDE A', cat: catNo(54), paper: 'red' }, 384),
+        size: 7,
+        scale: SLEEVE_S,
+        lamp: false,
+        seed: 3,
+      })
+      single.group.position.set((FRAME_X[1] + FRAME_X[2]) / 2 - 0.2, RAIL_Y + 0.95, 0)
+      group.add(single.group)
 
       const ledge = makeLedge(FRAME_X[2] - FRAME_X[0] + 5)
       ledge.position.set(FRAME_X[1], 0, 0)
@@ -394,18 +424,9 @@ export default function create(): Chapter {
       group.add(pint.group)
       await nextFrame()
 
-      // photos: Dave now, the rest once the site has revealed (never block init)
-      const load = (url: string, target: Framed) =>
-        loadPhoto(url)
-          .then(({ tex, aspect }) => target.print.setImage(tex, aspect))
-          .catch(() => {
-            /* the print stays as bare paper */
-          })
-      void load(PEOPLE[0].photo, frames[0])
-      void whenRevealed().then(() => {
-        PEOPLE.slice(1).forEach((p, k) => void load(p.photo, frames[k + 1]))
-        void load(MASCOT.photo, mascot)
-      })
+      // cover photos: Dave now, the rest once the site has revealed (never block init)
+      covers[0].load()
+      void whenRevealed().then(() => covers.slice(1).forEach(c => c.load()))
     },
 
     onEnter() {
@@ -414,32 +435,23 @@ export default function create(): Chapter {
     },
 
     update(local: number, frame: Frame, ctx: ChapterContext) {
-      reduced = frame.reducedMotion
       q = clock.update(local, frame.dt)
       if (dirty) measure()
       buildPoses()
       poseAt(q, cur)
       updateDom(q)
 
-      // prints: the photo fades in over the paper once it arrives
-      const all = [...frames, mascot]
-      for (const f of all) {
-        const target = f.print.loaded ? 1 : 0
-        f.print.has = reduced ? target : damp(f.print.has, target, 5, frame.dt)
-        if (f.print.has > 0.999) f.print.has = 1
-        f.print.material.uniforms.uHas.value = f.print.has
-      }
-      // picture lights: the print in focus is lit, the others glow low
-      const moving = GLIDES.some(([a, b]) => q > a && q < b) ? 1 : 0
-      frames.forEach((f, i) => {
+      // picture lights: the album in focus is lit, the others glow low; its
+      // record eases a little further out of the sleeve (all from q)
+      displays.forEach((d, i) => {
         const lv = cur.lamps[i]
-        if (f.lamp) f.lamp.intensity = 4.5 * lv
-        if (f.lampGlow) f.lampGlow.emissiveIntensity = 0.35 + 1.5 * lv
-        f.print.material.uniforms.uLit.value = 0.6 + 0.4 * lv
-        f.glint.set(0.55 + 0.45 * moving)
+        if (d.lamp) {
+          d.lamp.spot.intensity = 4.2 * lv
+          d.lamp.glow.emissiveIntensity = 0.35 + 1.5 * lv
+        }
+        const f = smoothstep(0.45, 1, lv)
+        d.record.group.position.x = lerp(OUT[0], OUT[1], f)
       })
-      mascot.print.material.uniforms.uLit.value = 0.62
-      mascot.glint.set(0.8)
 
       const w = ctx.world.params
       w.top = '#0e0806'
@@ -466,6 +478,7 @@ export default function create(): Chapter {
       w.fill = 0.1
       w.env = 0.7
       w.envTurn = 0.3
+      syncVinylLights(ctx.world)
 
       const p = ctx.post.params
       // the pour: stout (the pint on the ledge) into the Back Room

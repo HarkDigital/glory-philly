@@ -3,11 +3,25 @@ import type { CameraPose, Chapter, ChapterContext, Frame } from '../../core/type
 import { Callout, el, reveal, rise, setRise } from '../../core/dom'
 import { clamp, ease, lerp, smoothstep } from '../../core/math'
 import { nextFrame } from '../../core/yield'
-import { BAR, DRAFTS, LINKS, SECTIONS, TAPS_UI } from '../../content'
+import { BAR, BRAND, DRAFTS, LINKS, SECTIONS, TAPS_UI } from '../../content'
 import { makeGlass, makeBacklight, makePourStream, BEERS, type BeerStyle, type Glass, type GlassShape } from '../../kit/beer'
 import { makeBarTop, makeBrickWall } from '../../kit/bar'
 import { makeTapWall, TRAY_Y, FAUCET_Y, FAUCET_Z, type TapSpec } from '../../kit/tap'
 import { StoryClock } from '../../kit/pace'
+import {
+  CrateRig,
+  catNo,
+  coverAtlas,
+  coverTexture,
+  labelTexture,
+  makeCrate,
+  makeRecord,
+  makeSleeve,
+  syncVinylLights,
+  tracklistTexture,
+  type Crate,
+  type PaperName,
+} from '../../kit/vinyl'
 import { makeChalkboard, type Chalkboard } from './chalk'
 import './taps.css'
 
@@ -27,7 +41,15 @@ import './taps.css'
  *  0.87–1.000   the chalkboard at the end of the wall: "Last Update
  *               2026-09-28", the app + Untappd buttons.
  *
- * The camera and the active group run on a StoryClock (kit/pace.ts), so a
+ * THE RECORD CRATE: a Glory Records bin on the bar in front of the taps holds
+ * the draft list as three LPs ("Drafts · American / International / Local",
+ * GLY-021…023; each sleeve back is its group's tracklist with tap numbers).
+ * Per group the crate slides down the bar to the pouring tap, the CrateRig
+ * lifts that LP, turns it to camera and the amber record slides out and
+ * spins while the handle pours; then it goes home and flips onto the stack.
+ * The DOM menu board stays the readable list (the sleeve back is the art).
+ *
+ * The camera, the pours and the rig run on a StoryClock (kit/pace.ts), so a
  * fling never sweeps the lit wall across the frame faster than it can read.
  * The 36th handle is the house handle (the red G roundel, no beer named):
  * 35 beers are listed and the wall has 36 taps.
@@ -121,10 +143,11 @@ GROUPS.forEach(([a, b], g) => {
   const p = POUR_I[g]
   const f = FIRST[g]
   KEYS.push([a + 0.14 * L, S({ x: X(f) + 0.5, y: 1.4, yaw: 0.62, pitch: 0.14, span: 3.0, hgt: 1.5 })])
-  KEYS.push([a + 0.3 * L, S({ x: X(p) - 0.05, y: 1.2, yaw: 0.42, pitch: 0.12, span: 2.0, hgt: 2.3 })])
-  KEYS.push([a + 0.45 * L, S({ x: X(p), y: 1.08, yaw: 0.3, pitch: 0.1, span: 1.5, hgt: 2.25 })])
-  KEYS.push([a + 0.8 * L, S({ x: X(p), y: 1.04, yaw: 0.2, pitch: 0.08, span: 1.4, hgt: 2.2 })])
-  KEYS.push([b, S({ x: X(p) + 0.1, y: 1.1, yaw: 0.32, pitch: 0.1, span: 1.8, hgt: 2.4 })])
+  // the pour on the left of the frame, the LP presented beside it, the record out to the right
+  KEYS.push([a + 0.3 * L, S({ x: X(p) + 0.95, y: 1.12, z: 0.0, yaw: 0.32, pitch: 0.1, span: 3.4, hgt: 2.3, tdx: -0.25 })])
+  KEYS.push([a + 0.45 * L, S({ x: X(p) + 1.12, y: 1.04, z: 0.15, yaw: 0.22, pitch: 0.08, span: 3.25, hgt: 2.25, tdx: -0.28 })])
+  KEYS.push([a + 0.8 * L, S({ x: X(p) + 1.15, y: 1.02, z: 0.15, yaw: 0.18, pitch: 0.08, span: 3.2, hgt: 2.2, tdx: -0.28 })])
+  KEYS.push([b, S({ x: X(p) + 1.0, y: 1.1, z: 0.0, yaw: 0.26, pitch: 0.1, span: 3.5, hgt: 2.4, tdx: -0.2 })])
 })
 KEYS.push([END_A + 0.02, S({ x: WALL_R + 0.55, y: 1.4, z: -0.7, yaw: 0.55, pitch: 0.1, span: 3.3, hgt: 1.9, tdx: 0.45 })])
 KEYS.push([1.0, S({ x: WALL_R + 0.65, y: 1.42, z: -0.7, yaw: 0.66, pitch: 0.11, span: 3.6, hgt: 2, tdx: 0.5 })])
@@ -140,6 +163,33 @@ function sampleShot(t: number): Shot {
   for (const k of KEYS_N) _shot[k] = lerp(a[k], b[k], s)
   return _shot
 }
+
+/* ---------------- the record crate ---------------- */
+
+/** crate x at each group's pour: just right of the pouring glass */
+const CRATE_DX = 1.12
+const CRATE_Z = 0.56
+/** crate-local presentation point: beside the faucets, in front of the bin */
+const PRESENT = new THREE.Vector3(0.02, 1.02, 0.12)
+const stationX = (g: number) => X(POUR_I[g]) + CRATE_DX
+/** the crate slides down the bar between groups (after the last flip, before the next lift) */
+function crateXAt(q: number) {
+  let x = stationX(0)
+  for (let g = 1; g < GROUPS.length; g++) {
+    const t0 = GROUPS[g - 1][1]
+    const t1 = GROUPS[g][0] + 0.1 * (GROUPS[g][1] - GROUPS[g][0])
+    x = lerp(x, stationX(g), ease.inOutCubic(clamp((q - t0) / (t1 - t0))))
+  }
+  return x
+}
+/** rig item 0..3: group g's LP is in hand while its group runs (u 0.12 → 1.02) */
+function itemAt(q: number) {
+  let it = 0
+  for (let g = 0; g < GROUPS.length; g++) it += clamp(((q - GROUPS[g][0]) / (GROUPS[g][1] - GROUPS[g][0]) - 0.12) / 0.9)
+  return it
+}
+const LP_PAPER: PaperName[] = ['cream', 'stout', 'red']
+const LABEL_PAPER: PaperName[] = ['red', 'cream', 'amber']
 
 /* ---------------- layout ---------------- */
 
@@ -209,6 +259,8 @@ export default function taps(): Chapter {
   let bulbs: THREE.InstancedMesh
   let backGlow: THREE.Mesh
   const cards: ReturnType<typeof makeBacklight>[] = []
+  let crate: Crate
+  let rig: CrateRig
 
   // DOM
   let scrim: HTMLElement
@@ -307,6 +359,53 @@ export default function taps(): Chapter {
       group.add(stream.mesh)
       await nextFrame()
 
+      // ---- the record crate: the draft list as three LPs
+      crate = makeCrate({ legend: ['GLORY RECORDS · DRAFTS', `${BAR.taps} ${TAPS_UI.tap.toUpperCase()}S`] })
+      crate.group.position.set(stationX(0), 0, CRATE_Z)
+      group.add(crate.group)
+      const sleeves = DRAFTS.map((g, gi) => {
+        const first = FIRST[gi]
+        const last = first + g.beers.length - 1
+        const cat = catNo(21 + gi)
+        return makeSleeve({
+          front: coverTexture({ title: g.title, kicker: TAPS_UI.drafts, sub: `${TAPS_UI.tap}s ${TAPS[first].spec.num}–${TAPS[last].spec.num}`, cat, paper: LP_PAPER[gi] }),
+          // read lying face-down on the stack, from the crate's front
+          back: tracklistTexture({
+            flip: true,
+            title: TAPS_UI.drafts,
+            sub: g.title,
+            cat,
+            paper: LP_PAPER[gi] === 'red' ? 'cream' : LP_PAPER[gi],
+            tracks: g.beers.map((b, k) => ({ name: b, value: TAPS[first + k].spec.num })),
+            notes: `${TAPS_UI.lastUpdate} ${BAR.lastUpdate}`,
+          }),
+        })
+      })
+      const labels = DRAFTS.map((g, gi) => labelTexture({ title: g.title, sub: TAPS_UI.drafts, side: 'SIDE A', cat: catNo(21 + gi), paper: LABEL_PAPER[gi] }))
+      const house: { title: string; sub?: string; kicker?: string; paper: PaperName }[] = [
+        { title: BRAND.short, sub: BRAND.motto, kicker: 'Glory Records', paper: 'red' },
+        { title: BRAND.neighborhood, sub: BRAND.street, paper: 'stout' },
+        { title: TAPS_UI.drafts, kicker: 'Glory Records', paper: 'bone' },
+        { title: BRAND.short, sub: BRAND.tagline, paper: 'amber' },
+        { title: 'Glory Records', paper: 'cream' },
+        { title: BRAND.short, kicker: BRAND.neighborhood, paper: 'stout' },
+        { title: TAPS_UI.drafts, sub: BRAND.name, paper: 'red' },
+        { title: 'Glory Records', sub: BRAND.motto, paper: 'bone' },
+      ]
+      const atlas = coverAtlas(house.map((c, i) => ({ ...c, cat: catNo(30 + i) })), undefined, ctx.mobile ? 1024 : 2048)
+      rig = new CrateRig({
+        crate,
+        sleeves,
+        labels,
+        record: makeRecord({ label: labels[0], color: '#b0561a' }),
+        fillers: { count: house.length, atlas },
+        present: PRESENT,
+        yaw: [12, 12, 12],
+        pitch: 6,
+        slide: 0.5,
+      })
+      await nextFrame()
+
       // canvas type: fonts first, redraw once all fonts settle
       const fontsReady = Promise.all([
         document.fonts.load('400 40px "Alfa Slab One"'),
@@ -379,6 +478,7 @@ export default function taps(): Chapter {
 
     onEnter() {
       clock.reset()
+      rig?.reset()
     },
 
     busy: () => clock.busy,
@@ -426,6 +526,10 @@ export default function taps(): Chapter {
         stream.update(rm ? 0 : frame.time)
       }
       if (sOn <= 0) stream.set(tmp, tmp, 0)
+      // ---- the crate: slides to the pouring tap, the LP lifts, the record spins
+      crate.group.position.x = crateXAt(q)
+      rig.update(itemAt(q), frame, 0)
+
       const endV = smoothstep(END_A - 0.01, END_A + 0.02, q)
       if (q > END_A - 0.02) tint = 0.45
       ctx.post.params.beer = tint
@@ -437,7 +541,9 @@ export default function taps(): Chapter {
       w.bulbs = 0.4
       w.cyc = 0.35
       w.haze = 0.18
-      w.spot = 0.8
+      // cream sleeves bloom under a hot key: keep it moderate near the crate
+      w.spot = 0.5
+      ctx.post.params.bloomThreshold = 1.05
       w.spotPos.set(shot.x + 1.4, 4.6, 3.2)
       w.spotAt.set(shot.x - 0.1, 0.9, -0.6)
       w.spotAngle = 0.58
@@ -451,6 +557,7 @@ export default function taps(): Chapter {
       w.fill = 0.22
       // the room's ambient stays low; steel, lacquer and glass carry their own reflections
       w.env = 0.38
+      syncVinylLights(ctx.world)
 
       // ---- HUD
       const introV = smoothstep(INTRO_A, INTRO_A + 0.02, q) * (1 - smoothstep(INTRO_B - 0.02, INTRO_B + 0.005, q))
@@ -487,7 +594,8 @@ export default function taps(): Chapter {
         const u = uOf(q, g)
         if (u > 0.3 && u < 0.95) cg = g
       }
-      if (cg >= 0) {
+      // short landscape: no room beside the panel for a label (the plate reads on the handle)
+      if (cg >= 0 && !layout.short) {
         const u = uOf(q, cg)
         const i = POUR_I[cg]
         callout.label.textContent = `${TAPS_UI.tap} ${TAPS[i].spec.num} · ${TAPS[i].name}`

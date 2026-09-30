@@ -1,23 +1,24 @@
 import * as THREE from 'three'
 import { makeBrickWall, makeBarTop } from '../../kit/bar'
-import { makePrintMaterial, makeGlintMaterial, type PrintMaterial, type GlintMaterial } from './print'
+import { makeSleeve, makeRecord, SEVEN, REC12, REC7, type Sleeve, type Record as VinylRecord } from '../../kit/vinyl'
 
 /*
- * THE CREW's set: a stretch of Glory's exposed brick with framed
- * silver-gelatin prints hung on it, each under a brass picture light, and a
- * wooden ledge below them (the stout sits there).
+ * THE CREW's set: a stretch of Glory's exposed brick with three record-store
+ * "now playing" displays on it — a 12" sleeve (the portrait is the cover)
+ * standing on a black steel rail, its record half out showing the label —
+ * each under a brass picture light; a 7" single (The Glorious Archibald)
+ * between two of them; a wooden ledge below (the stout sits there).
  *
- * World layout (units ≈ 0.25 m): the wall is the plane z = 0, frames hang
- * with their centres at y = FRAME_Y, x = FRAME_X[i]; the ledge's top is y = 0.
+ * World layout: the wall is the plane z = 0; display i's sleeve stands on a
+ * rail at y = RAIL_Y, centred on x = FRAME_X[i]; the ledge's top is y = 0.
  */
 
+/** where each person's display hangs (the sleeve's centre x) */
 export const FRAME_X = [0, 6.6, 13.2]
-export const FRAME_Y = 2.4
-export const PRINT_H = 1.9
-export const MAT = 0.3
-export const MOLD = 0.1
-/** the lamp bar sits this far above a frame's top edge */
-export const LAMP_ABOVE = 0.24
+/** the display rails' height on the wall */
+export const RAIL_Y = 1.1
+/** world size of a 12" sleeve on this wall */
+export const SLEEVE_S = 1.6
 
 let brickBump: THREE.CanvasTexture | null = null
 /**
@@ -93,175 +94,148 @@ export function makeWall(w: number, h: number): THREE.Mesh {
   return wall
 }
 
-export interface Framed {
-  group: THREE.Group
-  print: PrintMaterial
-  glint: GlintMaterial
-  /** outer size of the frame (molding included) */
-  width: number
-  height: number
-  /** the picture light (null for the small prints) */
-  lamp: THREE.SpotLight | null
-  lampGlow: THREE.MeshStandardMaterial | null
-}
-
-const moldMat = () =>
-  new THREE.MeshPhysicalMaterial({
-    color: '#0c0908',
-    roughness: 0.32,
-    metalness: 0,
-    clearcoat: 0.8,
-    clearcoatRoughness: 0.18,
-    envMapIntensity: 1.1,
-  })
-
-/** A frame molding: outer rect minus the opening, extruded toward +z with a small round-over. */
-function moldingGeo(ow: number, oh: number, iw: number, ih: number, depth: number) {
-  const s = new THREE.Shape()
-  s.moveTo(-ow / 2, -oh / 2)
-  s.lineTo(ow / 2, -oh / 2)
-  s.lineTo(ow / 2, oh / 2)
-  s.lineTo(-ow / 2, oh / 2)
-  s.closePath()
-  const hole = new THREE.Path()
-  hole.moveTo(-iw / 2, -ih / 2)
-  hole.lineTo(-iw / 2, ih / 2)
-  hole.lineTo(iw / 2, ih / 2)
-  hole.lineTo(iw / 2, -ih / 2)
-  hole.closePath()
-  s.holes.push(hole)
-  const bevel = Math.min(0.014, depth * 0.25)
-  const geo = new THREE.ExtrudeGeometry(s, {
-    depth: depth - bevel * 2,
-    bevelEnabled: true,
-    bevelThickness: bevel,
-    bevelSize: bevel,
-    bevelSegments: 3,
-    curveSegments: 1,
-  })
-  geo.translate(0, 0, bevel)
-  return geo
-}
-
 const brass = () =>
   new THREE.MeshStandardMaterial({ color: '#b08a4a', metalness: 1, roughness: 0.32, envMapIntensity: 1.2 })
 
+export interface Lamp {
+  /** origin = the backplate on the wall */
+  group: THREE.Group
+  spot: THREE.SpotLight
+  glow: THREE.MeshStandardMaterial
+}
+
 /**
- * A framed print: black satin molding, a cream mat with a bright bevelled
- * window, the print (aspect kept: never stretched), glass that catches the
- * studio strips. With `lamp`, a brass picture light above it (a real, weak
- * SpotLight washing the print and raking the brick around it).
+ * A brass picture light: a backplate on the wall, an arm out to a half-round
+ * hood with a warm tube inside, and a real (weak, shadowless) SpotLight that
+ * washes what hangs below it and rakes the brick around it. `drop` = how far
+ * below the plate its aim point is.
  */
-export function makeFramed({
-  aspect,
-  printH = PRINT_H,
-  mat = MAT,
-  mold = MOLD,
+export function makeLamp(lw: number, drop: number): Lamp {
+  const group = new THREE.Group()
+  const ly = 0.18
+  const lz = 0.5
+  const b = brass()
+  const bIn = brass()
+  bIn.side = THREE.DoubleSide
+  // hood: a half-round brass trough, open toward the wall and down
+  const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, lw, 20, 1, true, -0.35, Math.PI), bIn)
+  hood.rotation.z = Math.PI / 2
+  hood.position.set(0, ly, lz)
+  group.add(hood)
+  for (const sx of [-1, 1]) {
+    const cap = new THREE.Mesh(new THREE.CircleGeometry(0.075, 20), bIn)
+    cap.rotation.y = (sx * Math.PI) / 2
+    cap.position.set((sx * lw) / 2, ly, lz)
+    group.add(cap)
+  }
+  const glow = new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffc27a', emissiveIntensity: 1.4 })
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, lw * 0.94, 10), glow)
+  tube.rotation.z = Math.PI / 2
+  tube.position.set(0, ly - 0.01, lz)
+  group.add(tube)
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.03), b)
+  plate.position.set(0, 0, 0.015)
+  group.add(plate)
+  const a0 = new THREE.Vector3(0, 0, 0.02)
+  const a1 = new THREE.Vector3(0, ly + 0.02, lz - 0.02)
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, a0.distanceTo(a1), 8), b)
+  arm.position.copy(a0).add(a1).multiplyScalar(0.5)
+  arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a1.clone().sub(a0).normalize())
+  group.add(arm)
+  const spot = new THREE.SpotLight('#fff0dc', 0, 0, 0.95, 0.85, 2)
+  spot.position.set(0, ly - 0.04, lz + 0.05)
+  spot.target.position.set(0, -drop, 0)
+  group.add(spot, spot.target)
+  return { group, spot, glow }
+}
+
+export interface Display {
+  /** origin: the sleeve's bottom-centre on the rail, on the wall plane */
+  group: THREE.Group
+  sleeve: Sleeve
+  record: VinylRecord
+  lamp: Lamp | null
+  /** extents in display-local units (rail and lamp included) */
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+const steel = () => new THREE.MeshStandardMaterial({ color: '#131112', metalness: 0.55, roughness: 0.42, envMapIntensity: 0.8 })
+
+/**
+ * The record-store "now playing" display: a black steel rail with a front
+ * lip on the brick, the sleeve standing on it leaning back a touch, its
+ * record half out to the right so the label shows, a picture light above.
+ * `scale` = world size of a 12" sleeve; `out` = how far the record's centre
+ * sits right of the sleeve's centre (in sleeve units).
+ */
+export function makeDisplay({
+  front,
+  label,
+  size = 12,
+  scale = 1.6,
+  out,
   lamp = true,
+  wear = 0.25,
   seed = 0,
 }: {
-  aspect: number
-  printH?: number
-  mat?: number
-  mold?: number
+  front: THREE.Texture
+  label: THREE.Texture
+  size?: 12 | 7
+  scale?: number
+  out?: number
   lamp?: boolean
+  wear?: number
   seed?: number
-}): Framed {
+}): Display {
   const group = new THREE.Group()
-  const pw = printH * aspect
-  const ph = printH
-  const iw = pw + mat * 2
-  const ih = ph + mat * 2
-  const ow = iw + mold * 2
-  const oh = ih + mold * 2
-  const depth = mold * 0.8
+  const k = size === 7 ? SEVEN : 1
+  const R = (size === 7 ? REC7 : REC12).R
+  const o = out ?? (size === 7 ? 0.44 : 0.64)
+  const S = scale
+  const sleeve = makeSleeve({ front, size, wear, seed, gloss: 0.4 })
+  sleeve.mesh.castShadow = true
+  const record = makeRecord({ label, size, seed: 11 + seed * 3, segments: 128 })
+  record.disc.castShadow = true
+  // the sleeve + record lean back against the wall from the rail
+  const holder = new THREE.Group()
+  holder.position.set(0, 0.004, 0.1)
+  holder.rotation.x = -0.055
+  holder.scale.setScalar(S)
+  record.group.position.set(o * k, 0.5 * k, 0)
+  record.setSpin(-0.08 - seed * 0.21)
+  holder.add(sleeve.group, record.group)
+  group.add(holder)
 
-  // backing board (so the shadow/edge reads as an object, not a sticker)
-  const back = new THREE.Mesh(
-    new THREE.BoxGeometry(ow - 0.02, oh - 0.02, 0.02),
-    new THREE.MeshStandardMaterial({ color: '#15100d', roughness: 0.9 }),
-  )
-  back.position.z = 0.02
-  group.add(back)
-
-  const molding = new THREE.Mesh(moldingGeo(ow, oh, iw, ih, depth), moldMat())
-  molding.position.z = 0.01
-  molding.castShadow = true
-  molding.receiveShadow = true
-  group.add(molding)
-
-  // the mat: warm cream, lit by the room
-  const matMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(iw, ih),
-    new THREE.MeshStandardMaterial({ color: '#d6cebf', roughness: 0.92, envMapIntensity: 0.3 }),
-  )
-  matMesh.position.z = 0.035
-  matMesh.receiveShadow = true
-  group.add(matMesh)
-  // the mat's bevelled window: a hairline of bare white core round the print
-  const bevel = new THREE.Mesh(
-    new THREE.PlaneGeometry(pw + 0.035, ph + 0.035),
-    new THREE.MeshStandardMaterial({ color: '#fbf7ee', roughness: 0.8, envMapIntensity: 0.3 }),
-  )
-  bevel.position.z = 0.0355
-  group.add(bevel)
-
-  const print = makePrintMaterial(pw / ph, seed)
-  const printMesh = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), print.material)
-  printMesh.position.z = 0.036
-  group.add(printMesh)
-
-  const glint = makeGlintMaterial()
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(iw, ih), glint.material)
-  glass.position.z = depth - 0.012
-  glass.renderOrder = 2
-  group.add(glass)
-
-  let spot: THREE.SpotLight | null = null
-  let glowMat: THREE.MeshStandardMaterial | null = null
-  if (lamp) {
-    const lw = Math.min(ow * 0.62, 1.4)
-    const ly = oh / 2 + LAMP_ABOVE
-    const lz = 0.5
-    const b = brass()
-    const bIn = brass()
-    bIn.side = THREE.DoubleSide
-    // hood: a half-round brass trough, open side down
-    const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, lw, 20, 1, true, -0.35, Math.PI), bIn)
-    hood.rotation.z = Math.PI / 2
-    hood.position.set(0, ly, lz)
-    group.add(hood)
-    // end caps
-    for (const sx of [-1, 1]) {
-      const cap = new THREE.Mesh(new THREE.CircleGeometry(0.075, 20), bIn)
-      cap.rotation.y = (sx * Math.PI) / 2
-      cap.position.set((sx * lw) / 2, ly, lz)
-      group.add(cap)
-    }
-    // the warm tube inside the hood (seen from below / at an angle)
-    glowMat = new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffc27a', emissiveIntensity: 1.4 })
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, lw * 0.94, 10), glowMat)
-    tube.rotation.z = Math.PI / 2
-    tube.position.set(0, ly - 0.01, lz)
-    group.add(tube)
-    // arm: from a backplate on the wall, up and out to the hood
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.03), b)
-    plate.position.set(0, oh / 2 + 0.06, 0.015)
-    group.add(plate)
-    const a0 = new THREE.Vector3(0, oh / 2 + 0.06, 0.02)
-    const a1 = new THREE.Vector3(0, ly + 0.02, lz - 0.02)
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, a0.distanceTo(a1), 8), b)
-    arm.position.copy(a0).add(a1).multiplyScalar(0.5)
-    arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a1.clone().sub(a0).normalize())
-    group.add(arm)
-
-    spot = new THREE.SpotLight('#fff0dc', 0, 0, 0.95, 0.85, 2)
-    spot.position.set(0, ly - 0.04, lz + 0.05)
-    spot.target.position.set(0, -oh * 0.32, 0)
-    group.add(spot, spot.target)
+  const left = -0.5 * k * S - 0.08
+  const right = (o * k + R) * S + 0.08
+  const rw = right - left
+  const rx = (left + right) / 2
+  const m = steel()
+  const shelf = new THREE.Mesh(new THREE.BoxGeometry(rw, 0.035, 0.18), m)
+  shelf.position.set(rx, -0.0175, 0.09)
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(rw, 0.075, 0.016), m)
+  lip.position.set(rx, 0.02, 0.172)
+  const back = new THREE.Mesh(new THREE.BoxGeometry(rw, 0.06, 0.012), m)
+  back.position.set(rx, -0.04, 0.006)
+  for (const r of [shelf, lip, back]) {
+    r.castShadow = true
+    r.receiveShadow = true
+    group.add(r)
   }
 
-  return { group, print, glint, width: ow, height: oh, lamp: spot, lampGlow: glowMat }
+  let lampOut: Lamp | null = null
+  let top = S * k
+  if (lamp) {
+    const cx = (left + right) / 2
+    lampOut = makeLamp(Math.min(rw * 0.55, 1.4), S * k * 0.5 + 0.12)
+    lampOut.group.position.set(cx, S * k + 0.14, 0)
+    group.add(lampOut.group)
+    top = S * k + 0.14 + 0.28
+  }
+  return { group, sleeve, record, lamp: lampOut, left, right, top, bottom: -0.06 }
 }
 
 /** The ledge below the frames: an oiled plank on black steel brackets. Top at y = 0. */

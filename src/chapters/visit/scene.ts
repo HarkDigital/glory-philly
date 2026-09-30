@@ -24,7 +24,7 @@ export const WIN = { x0: 0.7, x1: 4.3, y0: 0.9, y1: 7.7, depth: 0.34 }
 /** the plane the street is painted on */
 export const STREET_Z = -9
 /** the floor of the room */
-const FLOOR = -2.2
+export const FLOOR = -2.2
 /** brick tile size (8 courses per tile) and one course */
 const TILE = 1.3
 export const COURSE = TILE / 8
@@ -50,7 +50,7 @@ export function makeWall(): THREE.Group {
   // a black-painted skirting board and the old floorboards, dark
   const skirt = new THREE.Mesh(new THREE.BoxGeometry(21, 0.34, 0.05), new THREE.MeshStandardMaterial({ color: '#0f0c0b', roughness: 0.5 }))
   skirt.position.set(0.5, FLOOR + 0.17, 0.025)
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), new THREE.MeshStandardMaterial({ color: '#0b0705', roughness: 0.92 }))
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), new THREE.MeshStandardMaterial({ color: '#050302', roughness: 1, envMapIntensity: 0.2 }))
   floor.rotation.x = -Math.PI / 2
   floor.position.set(0.5, FLOOR, 15)
   floor.receiveShadow = true
@@ -508,4 +508,26 @@ export function makeVotive(): { group: THREE.Group; flame: THREE.Sprite; flameMa
   flame.renderOrder = 2
   group.add(base, jar, flame)
   return { group, flame, flameMat, jarMat }
+}
+
+// ─── the console the deck stands on ─────────────────────────────────────────
+
+/** A low black console against the brick: oiled plank top at y = top, body down to the floor. */
+export function makeConsole(x0: number, x1: number, depth: number, top: number, topMesh: THREE.Mesh): THREE.Group {
+  const g = new THREE.Group()
+  const w = x1 - x0
+  const h = top - 0.12 - FLOOR
+  const bodyMat = new THREE.MeshStandardMaterial({ color: '#100c0a', roughness: 0.5, envMapIntensity: 0.6 })
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w - 0.1, h, depth - 0.12), bodyMat)
+  body.position.set((x0 + x1) / 2, FLOOR + h / 2, depth / 2 - 0.02)
+  body.receiveShadow = true
+  // two doors: a hairline shadow gap between them and a thin reveal under the top
+  const gapMat = new THREE.MeshBasicMaterial({ color: '#030202' })
+  const gap = new THREE.Mesh(new THREE.PlaneGeometry(0.018, h - 0.2), gapMat)
+  gap.position.set((x0 + x1) / 2, FLOOR + h / 2, depth - 0.079)
+  const reveal = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.1, 0.02), gapMat)
+  reveal.position.set((x0 + x1) / 2, top - 0.2, depth - 0.079)
+  topMesh.position.set((x0 + x1) / 2, top, depth / 2)
+  g.add(body, gap, reveal, topMesh)
+  return g
 }

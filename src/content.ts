@@ -446,6 +446,8 @@ export const CREDIT = { text: 'Site concept by Hark Digital Design', url: 'https
 export const KITCHEN_UI = {
   /** the caption label over the photographed dish */
   pass: 'On the pass',
+  /** the caption label while a section sleeve shows its back */
+  tracklist: 'Tracklist',
   hours: 'Kitchen Hours',
 }
 
@@ -458,6 +460,11 @@ export const VISIT_UI = {
   app: 'Mobile App',
   untappd: 'Untappd',
   backToTop: 'Back to top',
+  /** the last record of the night (decorative sleeve + label art, no claims) */
+  record: 'Last Call',
+  format: 'Stereo',
+  sideA: 'Side A · Hours',
+  sideB: 'Side B · Visit',
 }
 
 /** TAPS chapter UI labels (plain, descriptive — not business claims). */
@@ -472,6 +479,8 @@ export const TAPS_UI = {
 /** EVENTS chapter UI: the inquiry form's own note (gloryphilly.com Book an Event). */
 export const EVENTS_UI = {
   required: 'All form fields are required.',
+  /** the photo album's count reads like a tracklist: "Track 1 / 7" (decorative) */
+  track: 'Track',
 }
 
 /** Hero chapter UI labels (plain descriptive, not claims). */
@@ -488,4 +497,10 @@ export const CELLAR_UI = {
   /** the wine card's heading (BAR.wine: "red, white and rosé" on tap) */
   wineTitle: 'Red, white & rosé on tap',
   cocktails: 'Specialty Cocktails',
+}
+
+/** PEOPLE chapter UI labels (plain, descriptive — not business claims). */
+export const PEOPLE_UI = {
+  /** the bio panel's eyebrow (the panels are the records' liner notes) */
+  notes: 'Liner notes',
 }

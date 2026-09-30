@@ -123,7 +123,7 @@ export function makePlate(r = 0.62): THREE.Mesh {
 /** A dessert fork lying flat (length along x, tines toward +x). */
 export function makeFork(len = 1.05): THREE.Group {
   const g = new THREE.Group()
-  const mat = new THREE.MeshStandardMaterial({ color: 0xe6e8ec, metalness: 1, roughness: 0.3, envMapIntensity: 2.2 })
+  const mat = new THREE.MeshStandardMaterial({ color: 0xe6e8ec, metalness: 0.85, roughness: 0.34, envMapIntensity: 2.6 })
   const handle = new THREE.Shape()
   const hl = len * 0.62
   handle.moveTo(0, -0.035)
@@ -139,7 +139,7 @@ export function makeFork(len = 1.05): THREE.Group {
   g.add(h)
   const tineGeo = new THREE.BoxGeometry(len * 0.28, 0.014, 0.018)
   tineGeo.translate(len * 0.14, 0, 0)
-  const tines = new THREE.InstancedMesh(tineGeo, new THREE.MeshStandardMaterial({ color: 0xe6e8ec, metalness: 1, roughness: 0.3, envMapIntensity: 2.2 }), 4)
+  const tines = new THREE.InstancedMesh(tineGeo, new THREE.MeshStandardMaterial({ color: 0xe6e8ec, metalness: 0.85, roughness: 0.34, envMapIntensity: 2.6 }), 4)
   const m = new THREE.Matrix4()
   for (let i = 0; i < 4; i++) {
     m.makeTranslation(hl + len * 0.095, 0.006, -0.045 + i * 0.03)

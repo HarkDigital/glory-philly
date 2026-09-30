@@ -1,29 +1,36 @@
 import * as THREE from 'three'
 import type { CameraPose, Chapter, ChapterContext, Frame } from '../../core/types'
 import { el, rise, setRise } from '../../core/dom'
-import { clamp, lerp, segment, smoothstep } from '../../core/math'
+import { clamp, lerp, smoothstep } from '../../core/math'
 import { nextFrame } from '../../core/yield'
 import { BRAND, CREDIT, HOURS, KITCHEN_HOURS, LINKS, RESERVATIONS, SECTIONS, SOCIALS, VISIT_UI } from '../../content'
+import { TT, catNo, makeRecord, makeSleeve, makeTurntable, syncVinylLights, tracklistTexture } from '../../kit/vinyl'
 import { makeGlass, BEERS } from '../../kit/beer'
 import { makeBarTop } from '../../kit/bar'
-import { WIN, SIGN, STREET_Z, drawSign, makeCoaster, makeSign, makeStreet, makeVotive, makeWall, makeWindow } from './scene'
+import { WIN, SIGN, STREET_Z, drawSign, makeCoaster, makeConsole, makeSign, makeStreet, makeVotive, makeWall, makeWindow } from './scene'
 import './visit.css'
 
 /*
  * LAST CALL (visit) — the site's ending. 1.8 vh, lands at 0.3.
  *
- * The front of the house at night, from inside: Glory's tall black-framed
- * window onto cobbled Chestnut Street (warm brick facades out of focus, a
- * lantern, a shop window, now and then a car's lights sliding past), the
- * painted wall sign on the brick beside it, and on the sill a last pint on a
- * G-roundel coaster next to a votive. The copy is a clean "last call" card:
- * phone and address first, bar + kitchen hours, reservations, the rest of
- * the ways in, socials, the footer and Back to top.
+ * The front of the house at night, from inside, and the last record of the
+ * night. Glory's tall black-framed window onto cobbled Chestnut Street (warm
+ * brick facades out of focus, a lantern, a lit bay window, now and then a
+ * car's lights sliding past); the painted wall sign on the brick beside it;
+ * under the sign a low black console with a walnut deck playing "Last Call"
+ * (GLY-007), its sleeve propped against the brick behind, back out (Side A ·
+ * Hours / Side B · Visit — decorative; the DOM card is the readable copy);
+ * on the sill a last gold pint on a G-roundel coaster next to a votive. The
+ * copy is a clean "last call" card set like a sleeve back: catalogue line,
+ * phone and address, bar + kitchen hours, reservations, the other ways in,
+ * socials, the footer and Back to top.
  *
- *   0.00–0.10  under the pour cut: tight on the sill, the pint sliding in
- *   0.07–0.24  the pint slides along the sill and settles (damped, from local)
+ *   0.00–0.10  under the pour cut: close on the deck, the record playing
+ *   0.10–0.15  the cue lifts the stylus off the run-out groove
+ *   0.14–0.30  the platter winds down from 33⅓ to a stop
+ *   0.15–0.27  the tonearm swings back to its rest; 0.27–0.31 it lowers onto it
  *   0.00–0.34  the camera pulls back and up to the whole window + sign
- *   0.08–0.20  the card: eyebrow + headline rise, then its blocks in order
+ *   0.075–0.2  the card: eyebrow + headline rise, then its blocks in order
  *   0.34–1.00  hold. Nothing moves but light: the votive, the street, a car.
  *
  * It's the last chapter: no out-cut, it holds to the end of the page.
@@ -33,21 +40,13 @@ const DOLLY_END = 0.34
 /** where the pint lands on the sill */
 const PINT = new THREE.Vector3(1.95, WIN.y0, 0.42)
 
+/** the console under the sign: x span, depth off the wall, top height (= the sill) */
+const CONSOLE = { x0: -2.85, x1: 0.42, depth: 2.5, top: WIN.y0 }
 /**
- * Where a turntable can sit (the vinyl follow-up): world position of the deck's
- * base centre, its yaw, and the console-top height it stands on. Keep the
- * deck within ~1.6 wide x 1.2 deep; the camera fit already includes this spot.
+ * The deck on the console: base centre, yaw (turned a touch toward the
+ * window), and scale (kit units: a 12" sleeve = 1; this room is ~1.9x that).
  */
-export const DECK = { position: new THREE.Vector3(-0.75, WIN.y0, 0.75), yaw: 0.18, top: WIN.y0 }
-
-/** a damped settle 0..1 (overshoots once, lands dead still at t = 1) */
-function settle(t: number) {
-  if (t <= 0) return 0
-  if (t >= 1) return 1
-  const s = 1 - Math.exp(-5.2 * t) * Math.cos(7.2 * t)
-  // blend to exactly 1 at the end so nothing creeps after the beat
-  return lerp(s, 1, smoothstep(0.7, 1, t))
-}
+export const DECK = { position: new THREE.Vector3(-1.2, CONSOLE.top, 1.3), yaw: 0.12, scale: 1.9, top: CONSOLE.top }
 
 /** group identical consecutive bar hours: Mon – Wed / Thu – Sun */
 function groupedHours() {
@@ -115,18 +114,61 @@ export default function create(): Chapter {
   votive.group.scale.setScalar(1.25)
   group.add(wall, win.group, street.mesh, sign.mesh, sill, pint.group, coaster, votive.group)
 
-  // VINYL HOOK (follow-up): the last record of the night. A turntable from
-  // src/kit/vinyl/ goes in `deckSlot` — on a low black console against the
-  // brick, under the sign and just left of the window, deck top at DECK.top.
-  // Plan: the platter winds down 0.10–0.34 with the dolly (derived from
-  // local, calm, no flashing), the tonearm lifts and parks by ~0.3, then it
-  // holds still to the end; the card can read as a sleeve back (Side A: Hours,
-  // Side B: Visit). Empty until the kit lands; nothing here renders.
+  pint.group.position.set(PINT.x, PINT.y + 0.012, PINT.z)
+  coaster.position.set(PINT.x, PINT.y + 0.0125, PINT.z)
+
+  // ---- the last record of the night: a walnut deck on a black console
+  const consoleTop = makeBarTop({ length: CONSOLE.x1 - CONSOLE.x0 + 0.08, depth: CONSOLE.depth, thickness: 0.12 })
+  {
+    const m = consoleTop.material as THREE.MeshPhysicalMaterial
+    m.clearcoat = 0.1
+    m.clearcoatRoughness = 0.55
+    m.roughness = 0.62
+    m.specularIntensity = 0.3
+  }
+  const consoleG = makeConsole(CONSOLE.x0, CONSOLE.x1, CONSOLE.depth, CONSOLE.top, consoleTop)
   const deckSlot = new THREE.Group()
   deckSlot.name = 'visit-deck-slot'
   deckSlot.position.copy(DECK.position)
   deckSlot.rotation.y = DECK.yaw
-  group.add(deckSlot)
+  deckSlot.scale.setScalar(DECK.scale)
+  const deck = makeTurntable({ finish: 'walnut' })
+  const record = makeRecord({ label: { title: VISIT_UI.record, sub: BRAND.motto, side: 'SIDE B', cat: catNo(7), paper: 'amber' } })
+  deck.setRecord(record)
+  deck.setGroove(0.9)
+  deckSlot.add(deck.group)
+  // its sleeve, propped against the brick behind the deck, back out
+  const hoursTracks = [
+    ...groupedHours().map(h => ({ name: `${VISIT_UI.barHours} · ${h.day}`, value: dash(h.hours) })),
+    ...KITCHEN_HOURS.map(h => ({ name: `${VISIT_UI.kitchenHours} · ${h.day}`, value: dash(h.hours) })),
+  ]
+  const sleeve = makeSleeve({
+    ink: true,
+    back: tracklistTexture({
+      title: VISIT_UI.record,
+      sub: BRAND.name,
+      cat: catNo(7),
+      paper: 'stout',
+      numbers: 'side',
+      sides: [
+        { name: VISIT_UI.sideA, tracks: hoursTracks },
+        { name: VISIT_UI.sideB, tracks: [{ name: BRAND.street }, { name: BRAND.city }, { name: BRAND.phone }, { name: LINKS.reserve.label }] },
+      ],
+      notes: BRAND.motto,
+    }),
+  })
+  const lean = new THREE.Group()
+  lean.position.set(-1.95, CONSOLE.top, 0.32)
+  lean.rotation.set(-0.13, 0.05, 0)
+  sleeve.group.rotation.y = Math.PI
+  sleeve.group.scale.setScalar(DECK.scale)
+  lean.add(sleeve.group)
+  group.add(consoleG, lean, deckSlot)
+  // the platter's centre in world space (the dolly starts close on it)
+  const platterAt = new THREE.Vector3(TT.px, TT.platterTop, TT.pz)
+    .multiplyScalar(DECK.scale)
+    .applyAxisAngle(new THREE.Vector3(0, 1, 0), DECK.yaw)
+    .add(DECK.position)
 
   // two practical lights of our own (intensity-driven, never toggled): the
   // votive's glow on the sill, and the street's spill through the window
@@ -161,6 +203,11 @@ export default function create(): Chapter {
       hud.blocks.push(b)
       return b
     }
+
+    // the sleeve-back catalogue line (decorative)
+    const cat = el('p', 'vs-cat', undefined, card)
+    el('span', '', `${catNo(7)} · ${VISIT_UI.format}`, cat)
+    el('span', '', VISIT_UI.record, cat)
 
     // headline
     const head = el('div', 'vs-head', undefined, card)
@@ -324,12 +371,19 @@ export default function create(): Chapter {
       const still = reduced || frame.reducedMotion
       const t = frame.time
 
-      // ---- the pint slides in along the sill and settles; foam relaxes
-      const k = still ? 1 : settle(segment(local, 0.05, 0.24))
-      pint.group.position.set(PINT.x + (1 - k) * 1.1, PINT.y + 0.012, PINT.z)
-      coaster.position.set(PINT.x + (1 - k) * 1.1, PINT.y + 0.0125, PINT.z)
-      const tilt = still ? 0 : (1 - k) * 0.05
-      pint.group.rotation.z = tilt
+      // ---- the last record: cue up, the platter winds down, the arm goes home
+      if (still) {
+        deck.setSpeed(0, true)
+        deck.setArm(0)
+        deck.setCue(0)
+      } else {
+        deck.setSpeed(33.333 * (1 - smoothstep(0.14, 0.3, local)))
+        deck.setArm(1 - smoothstep(0.15, 0.27, local))
+        deck.setCue(smoothstep(0.1, 0.15, local) * (1 - smoothstep(0.27, 0.31, local)))
+      }
+      deck.update(frame)
+
+      // ---- the pint on the sill; its foam relaxes as the room settles
       pint.setHead(still ? 0.085 : lerp(0.12, 0.085, smoothstep(0.06, 0.34, local)))
 
       // ---- the votive: a slow, soft breath (never a flicker you could count)
@@ -370,11 +424,11 @@ export default function create(): Chapter {
       w.bulbs = 0
       w.bokeh = 0
       w.haze = 0
-      w.spot = 1.1
+      w.spot = 0.95
       w.spotColor = '#ffdcb4'
       w.spotPos.set(-2.2, 9.5, 10)
-      w.spotAt.set(-1.3, 4.3, 0)
-      w.spotAngle = 0.24
+      w.spotAt.set(-1.3, 3.1, 0.7)
+      w.spotAngle = 0.3
       w.spotPenumbra = 0.9
       w.rimA = 0.9
       w.rimAColor = '#ffc27a'
@@ -385,6 +439,7 @@ export default function create(): Chapter {
       w.fill = 0.14
       w.env = 0.7
       w.envTurn = 0.4
+      syncVinylLights(ctx.world)
       const p = ctx.post.params
       p.beer = 0.55
       p.vignette = 0.38
@@ -403,9 +458,9 @@ export default function create(): Chapter {
       const fov = portrait ? 40 : 34
       if (portrait) {
         // phones and tall tablets: the pint against the window, the sign above-left
-        fit(frame, fov, SIGN.x0 + 1.6, WIN.x1 + 0.15, WIN.y0 - 0.35, SIGN.y1 - 0.2, pos, tgt)
+        fit(frame, fov, CONSOLE.x0 + 0.1, WIN.x1 + 0.15, WIN.y0 - 0.6, SIGN.y1 - 0.2, pos, tgt)
       } else {
-        fit(frame, fov, SIGN.x0 - 0.3, WIN.x1 + 0.35, WIN.y0 - 0.6, WIN.y1 - 0.7, pos, tgt)
+        fit(frame, fov, SIGN.x0 - 0.3, WIN.x1 + 0.35, WIN.y0 - 0.9, WIN.y1 - 0.7, pos, tgt)
       }
       // the street keeps a lit window straight behind the pint, seen from the resting pose
       {
@@ -415,8 +470,8 @@ export default function create(): Chapter {
         street.uniforms.uBack.value.set(pos.x + (PINT.x - pos.x) * tt, pos.y + (py - pos.y) * tt)
       }
       // start tight on the sill (the pint coming in), pull back to the whole front
-      startTgt.set(PINT.x - 0.35, PINT.y + 0.8, PINT.z)
-      startPos.set(PINT.x + 0.4, PINT.y + 1.35, PINT.z + 4.6)
+      startTgt.copy(platterAt)
+      startPos.set(platterAt.x + 1.1, platterAt.y + 2.3, platterAt.z + 3.4)
       const k = still ? 1 : smoothstep(0, DOLLY_END, local)
       const e = 1 - Math.pow(1 - k, 2.4)
       out.position.lerpVectors(startPos, pos, e)

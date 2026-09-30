@@ -70,9 +70,39 @@
 }
 .pp-stage .pp-meta {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 14px;
-  margin: 0 0 12px;
+  margin: 0 0 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  line-height: 1.4;
+}
+/* "Liner notes": the eyebrow's red G-roundel ring, then the label */
+.pp-stage .pp-notes {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--fg);
+}
+.pp-stage .pp-notes::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--glory-lit);
+}
+.pp-stage .pp-no {
+  letter-spacing: 0.1em;
+}
+.pp-stage .pp-role {
+  margin: 0 0 8px;
   font-family: var(--font-mono);
   font-size: 11.5px;
   font-weight: 500;
@@ -80,10 +110,6 @@
   text-transform: uppercase;
   color: var(--signal);
   line-height: 1.4;
-}
-.pp-stage .pp-no {
-  color: var(--fg-faint);
-  letter-spacing: 0.08em;
 }
 .pp-stage .pp-name {
   font-family: var(--font-display);
@@ -160,7 +186,12 @@
     padding: 18px 20px 20px;
   }
   .pp-stage .pp-meta {
-    margin-bottom: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    font-size: 10.5px;
+  }
+  .pp-stage .pp-role {
+    margin-bottom: 6px;
     font-size: 11px;
   }
   .pp-stage .pp-name {
@@ -206,7 +237,12 @@
     top: 3px;
   }
   .pp-stage .pp-meta {
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    padding-bottom: 5px;
+    font-size: 10px;
+  }
+  .pp-stage .pp-role {
+    margin-bottom: 2px;
     font-size: 10.5px;
   }
   .pp-stage .pp-name {

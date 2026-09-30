@@ -1,12 +1,13 @@
 import * as THREE from 'three'
 import type { CameraPose, Chapter, ChapterContext, Frame } from '../../core/types'
 import { el, reveal, rise, setRise } from '../../core/dom'
-import { clamp, ease, lerp, smoothstep, window01 } from '../../core/math'
+import { clamp, damp, ease, lerp, smoothstep, window01 } from '../../core/math'
 import { nextFrame } from '../../core/yield'
 import { BRAND, HERO_UI, LINKS } from '../../content'
 import { BEERS, makeBacklight, makeGlass, makePourStream, type Glass } from '../../kit/beer'
 import { GEL } from '../../world/World'
-import { SET, buildSet, type HeroSet } from './set'
+import { REC12, syncVinylLights } from '../../kit/vinyl'
+import { DECK_ANCHOR, SET, buildSet, type HeroSet } from './set'
 import './hero.css'
 
 /*
@@ -16,7 +17,10 @@ import './hero.css'
  *
  *   0.00–0.10  LANDING  the painted sign as type (motto → GLORY / Beer Bar &
  *                       Kitchen → tagline → address → Reserve / See the menu);
- *                       an empty tulip glass under the faucet
+ *                       the walnut deck spinning a red-label Glory record, arm
+ *                       on its rest; an empty tulip glass under the faucet
+ *   0.07–0.20  NEEDLE   the tonearm swings over the lead-in and cues down —
+ *                       the needle lands as the beer starts to run
  *   0.10–0.64  POUR     the glass lifts and tilts under the spout, the handle
  *                       pulls, beer streams in, the glass rights itself as it
  *                       fills, the foam rises; carbonation starts; the copy
@@ -52,14 +56,14 @@ const CZ = SET.coaster.z
 
 // prettier-ignore
 const KEYS: Key[] = [
-  { t: 0.0,  fx: PX + 0.3, fy: 1.8,  fz: PZ, az: -0.34, el: 0.1,   dist: 9.4,  sx: -0.2,  sy: -0.02, fov: 34 },
-  { t: 0.1,  fx: PX + 0.3, fy: 1.8,  fz: PZ, az: -0.3,  el: 0.09,  dist: 8.9,  sx: -0.19, sy: -0.02, fov: 34 },
+  { t: 0.0,  fx: -1.0,     fy: 1.1,  fz: -0.8, az: 0.3,  el: 0.2,   dist: 12.0, sx: -0.23, sy: -0.02, fov: 34 },
+  { t: 0.1,  fx: -0.9,     fy: 1.15, fz: -0.7, az: 0.34, el: 0.18,  dist: 11.2, sx: -0.21, sy: -0.02, fov: 34 },
   { t: 0.24, fx: PX - 0.35, fy: 1.95, fz: PZ, az: 0.55, el: 0.08,  dist: 6.9,  sx: -0.07, sy: 0.0,   fov: 34 },
   { t: 0.42, fx: PX - 0.2, fy: 2.1,  fz: PZ, az: 0.62,  el: 0.0,   dist: 5.8,  sx: -0.06, sy: 0.0,   fov: 34 },
   { t: 0.58, fx: PX,       fy: 2.15, fz: PZ, az: 0.36,  el: 0.04,  dist: 5.9,  sx: -0.08, sy: 0.0,   fov: 34 },
   { t: 0.7,  fx: (PX + CX) / 2, fy: 1.7, fz: (PZ + CZ) / 2, az: 0.12, el: 0.09, dist: 7.4, sx: -0.1, sy: 0.0, fov: 34 },
-  { t: 0.8,  fx: CX,       fy: 1.45, fz: CZ, az: -0.2,  el: 0.1,   dist: 7.2,  sx: -0.19, sy: -0.02, fov: 34 },
-  { t: 0.93, fx: CX,       fy: 1.45, fz: CZ, az: -0.36, el: 0.12,  dist: 6.8,  sx: -0.19, sy: -0.02, fov: 34 },
+  { t: 0.8,  fx: 0.3,      fy: 1.3,  fz: -0.2, az: 0.2,   el: 0.16,  dist: 10.2, sx: 0.25,  sy: -0.02, fov: 34 },
+  { t: 0.93, fx: 0.3,      fy: 1.3,  fz: -0.2, az: 0.04,  el: 0.16,  dist: 9.8,  sx: 0.25,  sy: -0.02, fov: 34 },
   { t: 1.0,  fx: CX,       fy: 1.75, fz: CZ, az: -0.3,  el: 0.05,  dist: 2.6,  sx: 0.0,   sy: 0.0,   fov: 30 },
 ]
 
@@ -139,6 +143,16 @@ export default function create(): Chapter {
   const landW = new THREE.Vector3()
   const box = new THREE.Box3()
   let lastRect = ''
+  let lastRec = ''
+  // the tonearm's damped pose (targets derive from local; this only smooths)
+  let armD = 0
+  let cueD = 1
+  let fresh = true
+  let prevL = 0
+  let needleAt = -1e9
+  let prevCue = 1
+  const recW = new THREE.Vector3()
+  const camRight = new THREE.Vector3()
 
   return {
     id: 'hero',
@@ -198,6 +212,8 @@ export default function create(): Chapter {
 
     onEnter() {
       lastRect = ''
+      lastRec = ''
+      fresh = true
     },
 
     update(local: number, frame: Frame, ctx: ChapterContext) {
@@ -235,9 +251,40 @@ export default function create(): Chapter {
       const accel = Math.sin(c * Math.PI * 2) * 0.06 * (c > 0 && c < 1 ? 1 : 0)
       const idle = reduced ? 0 : Math.sin(t * 1.3) * 0.004 * smoothstep(0.75, 0.8, l)
       glass.setSlosh(0, (-accel + ring + idle) * (reduced ? 0.3 : 1))
+      // the strip highlights curl on a tilted bowl: calm them while it leans
+      glass.setStrips(1 - 0.65 * (s.tilt / s.tiltMax))
       glass.setBubbles(smoothstep(0.3, 0.55, l))
       glass.setGlow(0.28 + 0.16 * smoothstep(0.55, 0.8, l))
       glass.update(t)
+
+      // THE DECK: spinning from the start; the arm swings over the lead-in
+      // and cues down as the pour begins (targets from local, damped by time)
+      const tt = set.tt
+      syncVinylLights(ctx.world)
+      const armT = smoothstep(0.07, 0.15, l)
+      const cueT = 1 - smoothstep(0.15, 0.195, l)
+      if (fresh) {
+        armD = armT
+        cueD = cueT
+        tt.setSpeed(33.333, true)
+      } else {
+        armD = damp(armD, armT, 7, frame.dt)
+        cueD = damp(cueD, cueT, 9, frame.dt)
+      }
+      tt.setSpeed(33.333)
+      tt.setArm(armD)
+      tt.setCue(cueD)
+      tt.setGroove(0.03 + 0.25 * smoothstep(0.2, 1, l))
+      tt.update(frame)
+      // the needle lands: one drop sound, forward scroll only, rate-limited
+      const nowS = performance.now() / 1000
+      if (!fresh && cueT < 0.5 && prevCue >= 0.5 && l > prevL && nowS - needleAt > 2.5) {
+        needleAt = nowS
+        window.dispatchEvent(new CustomEvent('hark:sfx', { detail: { kind: 'needle' } }))
+      }
+      prevCue = cueT
+      prevL = l
+      fresh = false
 
       // THE STREAM: straight down from the spout to the wall it hits / the foam
       glass.group.updateMatrixWorld(true)
@@ -333,6 +380,26 @@ export default function create(): Chapter {
             r.setProperty('--glory-hero-h', `${Math.round(y1 - y0)}px`)
           }
         }
+        // the record (the loader's spinning record match-cuts onto it): its
+        // centre and its on-screen radius (the flat disc's horizontal half-axis)
+        set.record.group.getWorldPosition(recW)
+        const R = REC12.R * DECK_ANCHOR.scale
+        camRight.setFromMatrixColumn(cam.matrixWorld, 0).normalize()
+        tmp.copy(recW).project(cam)
+        tmp2.copy(recW).addScaledVector(camRight, R).project(cam)
+        const cx = (tmp.x * 0.5 + 0.5) * frame.width
+        const cy = (-tmp.y * 0.5 + 0.5) * frame.height
+        const rr = Math.abs(tmp2.x - tmp.x) * 0.5 * frame.width
+        if (Number.isFinite(cx + cy + rr)) {
+          const key = `${Math.round(cx)}|${Math.round(cy)}|${Math.round(rr)}`
+          if (key !== lastRec) {
+            lastRec = key
+            const r = document.documentElement.style
+            r.setProperty('--glory-record-x', `${Math.round(cx)}px`)
+            r.setProperty('--glory-record-y', `${Math.round(cy)}px`)
+            r.setProperty('--glory-record-r', `${Math.round(rr)}px`)
+          }
+        }
       }
     },
 
@@ -341,13 +408,15 @@ export default function create(): Chapter {
       const q = portraitQ(frame.width / frame.height)
       const S = (p: Prop) => sample(l, p)
       const drift = reduced ? 0 : Math.sin(frame.time * 0.11) * 0.015
-      const az = S('az') + drift - q * 0.22 * (1 - smoothstep(0.1, 0.24, l))
+      const az = S('az') + drift
       const el = S('el') + q * 0.04
       // portrait: step back (the frame is narrow) and hold the subject high, the copy beneath
       const payoffQ = window01(l, 0.72, 0.97, 0.06)
-      const dist = S('dist') * lerp(1, lerp(l < 0.16 ? 1.42 : 1.55, 1.45, payoffQ) * (1 - 0.35 * smoothstep(0.93, 1, l)), q)
+      const dist = S('dist') * lerp(1, lerp(l < 0.16 ? 1.72 : 1.55, 1.45, payoffQ) * (1 - 0.35 * smoothstep(0.93, 1, l)), q)
       const fov = S('fov') + 6 * q
-      const F = tmp.set(S('fx'), S('fy'), S('fz'))
+      // portrait: the landing centres the record + glass pair; the payoff centres the glass
+      const landQ = 1 - smoothstep(0.1, 0.24, l)
+      const F = tmp.set(S('fx') + q * (-0.45 * landQ + 1.5 * payoffQ), S('fy'), S('fz') + q * 0.6 * payoffQ)
       out.position.set(F.x + Math.sin(az) * Math.cos(el) * dist, F.y + Math.sin(el) * dist, F.z + Math.cos(az) * Math.cos(el) * dist)
       // the framing shift: along camera right / up
       const rx = Math.cos(az)

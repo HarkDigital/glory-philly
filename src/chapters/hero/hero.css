@@ -5,7 +5,7 @@
   left: var(--gutter);
   top: var(--safe-top);
   bottom: var(--safe-bottom);
-  width: min(46vw, 640px);
+  width: min(42vw, 600px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -38,7 +38,7 @@
 .hero-stage .hero-glory {
   font-family: var(--font-display);
   font-weight: 400;
-  font-size: clamp(4.6rem, 13.2vw, 12.5rem);
+  font-size: clamp(4.6rem, 10.6vw, 10.5rem);
   line-height: 0.82;
   letter-spacing: 0.005em;
   text-transform: uppercase;
@@ -110,13 +110,13 @@
   color: var(--fg-muted);
 }
 
-/* the payoff: the motto returns with the CTAs */
+/* the payoff: the motto returns with the CTAs (on the right: deck · glass · words) */
 .hero-stage .hero-payoff {
   position: absolute;
-  left: var(--gutter);
+  right: var(--gutter);
   top: var(--safe-top);
   bottom: var(--safe-bottom);
-  width: min(48vw, 680px);
+  width: min(40vw, 580px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -128,11 +128,11 @@
   content: '';
   position: absolute;
   z-index: -1;
-  left: calc(-1 * var(--gutter));
-  right: -14%;
+  right: calc(-1 * var(--gutter));
+  left: -16%;
   top: -10%;
   bottom: -10%;
-  background: radial-gradient(ellipse 70% 60% at 30% 50%, rgba(10, 6, 4, 0.7), rgba(10, 6, 4, 0.35) 60%, rgba(10, 6, 4, 0) 100%);
+  background: radial-gradient(ellipse 70% 60% at 62% 50%, rgba(10, 6, 4, 0.74), rgba(10, 6, 4, 0.4) 60%, rgba(10, 6, 4, 0) 100%);
   pointer-events: none;
 }
 .hero-stage .hero-motto {
@@ -146,6 +146,7 @@
   .hero-stage .hero-payoff {
     top: auto;
     width: auto;
+    left: var(--gutter);
     right: var(--gutter);
     justify-content: flex-end;
     gap: 12px;
@@ -233,6 +234,9 @@
   }
   .hero-stage .hero-motto {
     font-size: 2.4rem;
+  }
+  .hero-stage .hero-payoff {
+    width: 38vw;
   }
   .hero-stage .hero-pourcap {
     bottom: calc(52px + env(safe-area-inset-bottom, 0px));

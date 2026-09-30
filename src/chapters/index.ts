@@ -23,7 +23,7 @@ const LAB = new URLSearchParams(location.search).get('lab')
 export const CHAPTERS: ChapterDef[] = [
   { id: 'hero', label: 'This Must Be the Place', length: 2.4, landing: 0, intro: 0, load: () => (LAB === 'vinyl' ? import('./lab-vinyl') : import('./hero/index')) },
   { id: 'taps', label: 'On Tap', length: 5.6, landing: 0.07, intro: 0.07, load: () => import('./taps/index') },
-  { id: 'kitchen', label: 'The Kitchen', length: 8.0, landing: 0.07, intro: 0.07, load: () => import('./kitchen/index') },
+  { id: 'kitchen', label: 'The Kitchen', length: 9.6, landing: 0.07, intro: 0.07, load: () => import('./kitchen/index') },
   { id: 'cellar', label: 'The Cellar', length: 8.2, landing: 0.07, intro: 0.07, load: () => import('./cellar/index') },
   { id: 'people', label: 'The Crew', length: 3.8, landing: 0.07, intro: 0.07, load: () => import('./people/index') },
   { id: 'events', label: 'The Back Room', length: 3.6, landing: 0.1, intro: 0.1, load: () => import('./events/index') },

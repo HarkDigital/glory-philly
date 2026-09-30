@@ -42,6 +42,23 @@
     visibility 0s linear 0s;
 }
 
+/* ---- the sleeve-back catalogue line: mono, a double hairline under it ---- */
+.stage-visit .vs-cat {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 calc(var(--vs-gap) * -0.35);
+  padding-bottom: 7px;
+  border-bottom: 3px double var(--line-strong);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  line-height: 1.2;
+}
+
 /* ---- headline + the red G stamp ---- */
 .stage-visit .vs-head {
   position: relative;
@@ -319,6 +336,14 @@
     --vs-gap: clamp(10px, 1.7vh, 16px);
   }
 }
+@media (max-height: 940px) and (min-height: 801px) and (orientation: landscape) {
+  .stage-visit .vs-card {
+    --vs-gap: 13px;
+  }
+  .stage-visit .vs-mail {
+    display: none;
+  }
+}
 @media (max-height: 800px) and (orientation: landscape) {
   .stage-visit .vs-card {
     --vs-gap: 10px;
@@ -479,6 +504,10 @@
 }
 /* very short phones (375x667 and the like): tighter still */
 @media (orientation: portrait) and (max-width: 560px) and (max-height: 740px) {
+  .stage-visit .vs-cat {
+    padding-bottom: 4px;
+    font-size: 9px;
+  }
   .stage-visit .vs-card {
     --vs-gap: 8px;
     padding: 12px 14px 10px;
@@ -503,6 +532,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas:
+      'cat cat'
       'head hours'
       'reach hours'
       'ctas social'
@@ -510,6 +540,11 @@
     column-gap: 18px;
     row-gap: 6px;
     align-content: start;
+  }
+  .stage-visit .vs-cat {
+    grid-area: cat;
+    padding-bottom: 4px;
+    font-size: 9px;
   }
   .stage-visit .vs-head {
     grid-area: head;
