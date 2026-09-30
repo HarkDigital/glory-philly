@@ -409,7 +409,7 @@ export default function taps(): Chapter {
       // canvas type: fonts first, redraw once all fonts settle
       const fontsReady = Promise.all([
         document.fonts.load('400 40px "Alfa Slab One"'),
-        document.fonts.load('500 20px "IBM Plex Mono"'),
+        document.fonts.load('600 20px "Inter Tight Variable"'),
         document.fonts.load('italic 400 40px "Instrument Serif"'),
       ]).catch(() => undefined)
       await Promise.race([fontsReady, new Promise(r => setTimeout(r, 1500))])

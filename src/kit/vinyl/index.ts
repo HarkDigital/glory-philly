@@ -66,7 +66,7 @@ import {
  * still while the label turns, a black anodized browser bin with diamond-cut
  * chamfers) and printed in Glory's house style: "Glory Records" GLY-001…
  * (decorative, not claims), the red-ring G roundel, Alfa Slab One titles,
- * Instrument Serif italic subs, IBM Plex Mono numbers. See it all in the lab:
+ * Instrument Serif italic subs, Inter Tight numbers. See it all in the lab:
  * ?lab=vinyl&view=all|tt|arm|rim|bin|crate|back|single[&mood=cyc]
  *
  * UNITS: a 12" sleeve is 1 × 1 (1 unit ≈ 12.4"); a 7" is SEVEN (0.586). The

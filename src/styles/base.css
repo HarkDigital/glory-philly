@@ -10,7 +10,7 @@
       GLORY RED (the sign, the G roundel) used like a stamp, sparingly.
       Type: Alfa Slab One for display (the heavy slab of the painted wall
       sign), Instrument Serif italic for the accent word (Resonance's
-      editorial voice), Inter Tight for reading, IBM Plex Mono for prices,
+      editorial voice), Inter Tight for reading and, in tracked caps, for prices,
       tap numbers and labels.
 
    Rules learned the hard way: no color-mix() (Safari 15 + the minifier drops
@@ -52,7 +52,9 @@
   /* the accent word is Instrument Serif italic (kept under the donor's name) */
   --font-script: var(--font-serif);
   --font-sans: 'Inter Tight Variable', 'Inter Tight', system-ui, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  /* labels, prices, tap numbers: Inter Tight in tracked caps (no monospace face on
+     this site — Mike never wants IBM Plex Mono) */
+  --font-mono: 'Inter Tight Variable', 'Inter Tight', system-ui, sans-serif;
 
   /* STRUCTURE: the persistent chrome owns these bands (+ notch insets) */
   --gutter: max(clamp(16px, 3.4vw, 48px), env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));

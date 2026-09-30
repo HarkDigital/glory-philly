@@ -13,7 +13,7 @@ import { calmUi } from './prefs'
  * red G roundel and "GLORY · BEER BAR & KITCHEN" set round it. Seven
  * darker bands in the grooves are the seven chapters (tracks). Under it:
  * the roundel, GLORY in Alfa Slab One, "Beer Bar & Kitchen", the address,
- * and "Spinning up · 064%" in IBM Plex Mono ("33⅓ rpm" once it's up).
+ * and "Spinning up · 064%" in Inter Tight caps ("33⅓ rpm" once it's up).
  * All DOM + inline SVG; the spin is one WAAPI rotation whose playbackRate
  * ramps (compositor-only).
  *

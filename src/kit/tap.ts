@@ -219,7 +219,7 @@ function drawPlate(g: CanvasRenderingContext2D, x0: number, y0: number, spec: Ta
     g.textAlign = 'center'
     g.textBaseline = 'middle'
     g.fillText('G', cx, cy + 3)
-    g.font = '500 20px "IBM Plex Mono", monospace'
+    g.font = '600 20px "Inter Tight Variable", "Inter Tight", system-ui, sans-serif'
     g.fillStyle = '#f0a53a'
     g.fillText(spec.num, cx, 44)
     g.restore()
@@ -229,7 +229,7 @@ function drawPlate(g: CanvasRenderingContext2D, x0: number, y0: number, spec: Ta
   g.fillStyle = ink
   g.textAlign = 'center'
   g.textBaseline = 'middle'
-  g.font = '500 26px "IBM Plex Mono", monospace'
+  g.font = '600 26px "Inter Tight Variable", "Inter Tight", system-ui, sans-serif'
   g.fillText(spec.num, W / 2, 46)
   g.fillStyle = rule
   g.fillRect(W / 2 - 22, 72, 44, 3)

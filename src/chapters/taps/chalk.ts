@@ -52,7 +52,7 @@ export function makeChalkboard({ w = 1.5, title, label, date, count }: { w?: num
     g.fillStyle = '#f0a53a'
     g.fillRect(CW / 2 - 150, 232, 300, 5)
     g.fillStyle = '#f1ece0'
-    g.font = '500 40px "IBM Plex Mono", monospace'
+    g.font = '600 40px "Inter Tight Variable", "Inter Tight", system-ui, sans-serif'
     g.fillText(label.toUpperCase().split('').join(' '), CW / 2, 340)
     g.font = '400 118px "Alfa Slab One", Georgia, serif'
     g.fillText(date, CW / 2, 480)

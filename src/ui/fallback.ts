@@ -13,8 +13,8 @@ import { publishTextures } from './texture'
  * if boot fails or the GPU context is gone for good): every chapter's copy,
  * in story order, visible — set like Glory itself: cream type on stout
  * black, Alfa Slab One headings (the painted wall sign), the accent word in
- * Instrument Serif italic in beer amber, Inter Tight for reading, IBM Plex
- * Mono for the small print, the red G roundel as the stamp. Each chapter is a
+ * Instrument Serif italic in beer amber, Inter Tight for reading and, in caps,
+ * for the small print, the red G roundel as the stamp. Each chapter is a
  * numbered room ("03 · The Kitchen") on the brick; the house's own photos sit
  * where they belong (the wall sign on the welcome, the plates beside the
  * menu, the crew beside their bios, the room beside the events). The copy is

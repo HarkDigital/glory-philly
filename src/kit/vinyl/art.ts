@@ -8,7 +8,7 @@ import { BRAND } from '../../content'
  * sides/columns), 7" company sleeves with a die-cut centre, and the paper
  * inner sleeve. Drawn with 2D canvas in the site's faces:
  *   Alfa Slab One (display) · Inter Tight (reading) · Instrument Serif italic
- *   (the accent) · IBM Plex Mono (numbers, prices, catalogue lines).
+ *   (the accent) · Inter Tight caps (numbers, prices, catalogue lines).
  * Paper grain, ring wear and scuffs are added by the sleeve shader, so these
  * canvases are pure type and layout. Every draw function takes (ctx, x0, y0,
  * size, spec) so it can also paint one cell of an atlas.
@@ -21,7 +21,7 @@ export const FONT = {
   display: '"Alfa Slab One", Rockwell, Georgia, serif',
   sans: '"Inter Tight Variable", "Inter Tight", system-ui, sans-serif',
   serif: '"Instrument Serif", Georgia, serif',
-  mono: '"IBM Plex Mono", ui-monospace, monospace',
+  mono: '"Inter Tight Variable", "Inter Tight", system-ui, sans-serif',
 }
 
 /** Glory palette (sRGB) */
