@@ -1,0 +1,336 @@
+/* THE CELLAR — every selector scoped under .cel */
+
+.cel {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* a soft dark wash on the copy side (the backlit wall is bright amber) */
+.cel .cel-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(8, 5, 3, 0.8) 0%, rgba(8, 5, 3, 0.55) 34%, rgba(8, 5, 3, 0) 62%);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.cel .cel-scrim.is-on {
+  opacity: 1;
+}
+
+/* ---- the headline ---- */
+.cel .cel-head {
+  position: absolute;
+  left: var(--gutter);
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: min(760px, 56vw);
+  display: grid;
+  gap: 18px;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.35s ease,
+    visibility 0s linear 0.35s;
+}
+.cel .cel-head.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.cel .cel-title {
+  font-size: clamp(2.4rem, 5.4vw, 5.6rem);
+  line-height: 0.98;
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- the card dock ---- */
+.cel .cel-dock {
+  position: absolute;
+  left: var(--gutter);
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  display: grid;
+  align-items: center;
+  justify-items: start;
+}
+.cel .cel-card {
+  grid-area: 1 / 1;
+  width: min(440px, 40vw);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate3d(0, 12px, 0);
+  transition:
+    opacity 0.32s ease,
+    transform 0.32s ease,
+    visibility 0s linear 0.32s;
+  max-height: 100%;
+}
+.cel .cel-card.is-on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+.cel .cel-card--american {
+  width: min(560px, 46vw);
+}
+.cel .cel-card--international {
+  width: min(900px, 58vw);
+}
+.cel.is-paged .cel-card--international {
+  width: min(600px, 52vw);
+}
+.cel .cel-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cel .cel-count {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}
+.cel .cel-h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.6rem, 2.5vw, 2.4rem);
+  line-height: 1.02;
+  margin: 12px 0 16px;
+  color: var(--fg);
+}
+.cel .cel-body {
+  font-size: 15px;
+  max-width: 44ch;
+}
+
+/* ---- the lists ---- */
+.cel .cel-pages {
+  display: grid;
+}
+.cel .cel-list {
+  grid-area: 1 / 1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--rows, 14), auto);
+  grid-auto-flow: column;
+  column-gap: 22px;
+  row-gap: 5px;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.3s ease,
+    visibility 0s linear 0.3s;
+}
+.cel .cel-list.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.cel .cel-list li {
+  display: flex;
+  gap: 9px;
+  align-items: baseline;
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.3;
+  color: var(--fg-muted);
+  transition: color 0.3s ease;
+}
+.cel .cel-list li.is-row {
+  color: var(--paper-2);
+}
+.cel .cel-n {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--fg-faint);
+  min-width: 1.8em;
+}
+.cel .cel-list li.is-row .cel-n {
+  color: var(--amber-hot);
+}
+.cel .cel-pager {
+  margin: 14px 0 0;
+}
+
+/* ---- wine ---- */
+.cel .cel-wine-list {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.cel .cel-wine-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14.5px;
+  color: var(--fg);
+}
+.cel .cel-dot {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(243, 234, 216, 0.4);
+}
+.cel .cel-dot--ring {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fg-faint);
+}
+
+/* ---- cocktails ---- */
+.cel .cel-card--cocktails .cel-body {
+  font-size: 14px;
+  margin-top: 10px;
+}
+.cel .cel-cock-stack {
+  display: grid;
+}
+.cel .cel-cock {
+  grid-area: 1 / 1;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.3s ease,
+    visibility 0s linear 0.3s;
+}
+.cel .cel-cock.is-on {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.cel .cel-cock-n {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+.cel .cel-cock-name {
+  margin: 8px 0 10px;
+  font-size: clamp(1.7rem, 2.7vw, 2.6rem);
+}
+.cel .cel-spec {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: 0.02em;
+  color: var(--fg);
+}
+
+/* ---- portrait: a bottom sheet ---- */
+.cel[data-layout='phone'] .cel-scrim,
+.cel[data-layout='tablet'] .cel-scrim {
+  background: linear-gradient(0deg, rgba(8, 5, 3, 0.85) 0%, rgba(8, 5, 3, 0.5) 45%, rgba(8, 5, 3, 0) 70%);
+}
+.cel[data-layout='phone'] .cel-scrim.is-head,
+.cel[data-layout='tablet'] .cel-scrim.is-head {
+  background: linear-gradient(0deg, rgba(8, 5, 3, 0) 20%, rgba(8, 5, 3, 0.7) 62%, rgba(8, 5, 3, 0.85) 100%);
+}
+.cel[data-layout='phone'] .cel-head,
+.cel[data-layout='tablet'] .cel-head {
+  top: calc(var(--safe-top) + 8px);
+  transform: none;
+  right: var(--gutter);
+  max-width: none;
+}
+.cel[data-layout='phone'] .cel-dock,
+.cel[data-layout='tablet'] .cel-dock {
+  right: var(--gutter);
+  align-items: end;
+  justify-items: stretch;
+}
+.cel[data-layout='phone'] .cel-card,
+.cel[data-layout='tablet'] .cel-card {
+  width: auto;
+}
+.cel[data-layout='phone'] .hud-panel {
+  padding: 16px 16px 14px;
+}
+.cel[data-layout='phone'] .cel-h3 {
+  margin: 8px 0 10px;
+  font-size: 1.5rem;
+}
+.cel[data-layout='phone'] .cel-list {
+  row-gap: 3px;
+}
+.cel[data-layout='phone'] .cel-list li {
+  font-size: 12.5px;
+}
+.cel[data-layout='phone'] .cel-body {
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.cel[data-layout='phone'] .cel-cock-name {
+  font-size: 1.55rem;
+  margin: 6px 0 6px;
+}
+.cel[data-layout='phone'] .cel-spec {
+  font-size: 12px;
+}
+.cel[data-layout='phone'] .cel-pager {
+  margin-top: 10px;
+}
+.cel[data-layout='phone'] .cel-wine-list {
+  margin-top: 12px;
+  gap: 5px;
+}
+.cel[data-layout='phone'] .cel-wine-list li {
+  font-size: 13px;
+}
+.cel[data-layout='tablet'] .cel-card--international .cel-list li {
+  font-size: 13px;
+}
+
+/* ---- short landscape: thin bands, compact cards ---- */
+.cel[data-layout='short'] .hud-panel {
+  padding: 12px 16px;
+}
+.cel[data-layout='short'] .cel-card {
+  width: min(400px, 48vw);
+}
+.cel[data-layout='short'] .cel-card--international,
+.cel[data-layout='short'] .cel-card--american {
+  width: min(560px, 60vw);
+}
+.cel[data-layout='short'] .cel-h3 {
+  font-size: 1.3rem;
+  margin: 6px 0 8px;
+}
+.cel[data-layout='short'] .cel-list {
+  row-gap: 2px;
+}
+.cel[data-layout='short'] .cel-list li {
+  font-size: 12px;
+  line-height: 1.25;
+}
+.cel[data-layout='short'] .cel-body {
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.cel[data-layout='short'] .cel-wine-list {
+  margin-top: 8px;
+  gap: 3px;
+}
+.cel[data-layout='short'] .cel-wine-list li {
+  font-size: 12.5px;
+}
+.cel[data-layout='short'] .cel-cock-name {
+  font-size: 1.35rem;
+  margin: 4px 0;
+}
+.cel[data-layout='short'] .cel-pager {
+  margin-top: 6px;
+}
+.cel[data-layout='short'] .hud-rule {
+  margin: 8px 0;
+}
+.cel[data-layout='short'] .cel-title {
+  font-size: clamp(2rem, 5vw, 3rem);
+}
