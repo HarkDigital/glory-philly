@@ -1,19 +1,16 @@
 /*
- * Small procedural tiles for the DOM layer (the chrome's plates, the menu,
- * the rotate card, the fallback), drawn once on tiny canvases and handed to
- * CSS as data URLs — the woods and papers of the room, so the UI and the 3D
- * stage share one language:
+ * Small procedural tiles for the DOM layer (the menu dialog, the rotate
+ * card, the fallback page), drawn once on tiny canvases and handed to CSS as
+ * data URLs, so the UI and the 3D room share one language:
  *
- *   walnut()  dark WALNUT grain for the chrome's plates: long, gently
- *             wandering grain lines and fine pores, as a transparent overlay
- *             (dark lines, a faint warm sheen) on a flat dark-wood colour.
- *   paper()   CREAM STOCK: the fibre and speckle of an uncoated gig poster /
- *             setlist sheet, as a transparent overlay on a flat cream.
+ *   brick()   OLD PHILADELPHIA BRICK after dark: running bond, dusty
+ *             red-brown bricks, recessed mortar (opaque; CSS washes it dark).
+ *   paper()   MENU-CARD STOCK: the fibre and speckle of an uncoated cream
+ *             card, as a transparent overlay on a flat cream.
  *
- * Every tile wraps seamlessly (periodic noise lattices). Cost: a 128² tile is
- * ~16k pixel writes, well under a millisecond; each is built once per page
- * (cached) and only when a caller asks. Blocked canvases (privacy modes)
- * return '' and the CSS falls back to its flat colour.
+ * Every tile wraps seamlessly (periodic noise lattices). Each is built once
+ * per page (cached) and only when a caller asks. Blocked canvases (privacy
+ * modes) return '' and the CSS falls back to its flat colour.
  */
 
 const cache = new Map<string, string>()
@@ -76,49 +73,56 @@ function paint(
 }
 
 /**
- * Walnut: grain lines running along x, wandering on a slow field, with fine
- * pores stretched along the grain. Dark (multiply-like black at low alpha)
- * for the late wood, a faint warm sheen between. Meant at 128 x 64 CSS px.
+ * Old Philadelphia brick, after dark: running bond in a 4-course tile, each
+ * brick its own dusty red-brown with a soft mottle and chipped edges, recessed
+ * mortar joints. Drawn dark (it sits behind cream type at ≥ 4.5:1 once the
+ * CSS lays a stout wash over it). Meant at 160 x 80 CSS px.
  */
-export function walnut() {
-  return paint('walnut', 256, 128, (d, w, h) => {
-    const r = rng(29)
-    const warp = field(r, 2, 3)
-    const warp2 = field(r, 5, 6)
-    const pores = field(r, 16, 64)
-    const figure = field(r, 3, 2)
-    const LINES = 7 // grain lines per tile height (an integer: the tile wraps)
-    for (let y = 0; y < h; y++)
+export function brick() {
+  return paint('brick', 320, 160, (d, w, h) => {
+    const r = rng(19)
+    const mottle = field(r, 8, 4)
+    const grit = field(r, 64, 32)
+    const COURSES = 4
+    const PER = 2 // bricks per course across the tile
+    const ch = h / COURSES
+    const bw = w / PER
+    const tint: number[] = Array.from({ length: COURSES * PER * 2 }, () => r())
+    for (let y = 0; y < h; y++) {
+      const row = Math.floor(y / ch)
+      const yIn = y - row * ch
       for (let x = 0; x < w; x++) {
+        const shift = row % 2 ? bw / 2 : 0
+        const xs = (x + shift) % w
+        const col = Math.floor(xs / bw)
+        const xIn = xs - col * bw
+        const joint = Math.min(yIn, ch - yIn, xIn, bw - xIn)
         const u = x / w
         const v = y / h
-        const t = v * LINES + (warp(u, v) - 0.5) * 2.2 + (warp2(u, v) - 0.5) * 0.5
-        const ring = 0.5 + 0.5 * Math.cos(t * Math.PI * 2)
-        // late wood: a narrow dark band
-        const late = ring * ring * ring * ring * ring * ring
-        const pore = pores(u, v)
-        const fig = figure(u, v)
-        const dark = Math.min(1, late * 0.85 + (pore < 0.3 ? (0.3 - pore) * 1.6 : 0) + (1 - fig) * 0.12)
-        const sheen = Math.max(0, (1 - ring) * 0.5 + (fig - 0.5) * 0.6) * (pore > 0.55 ? 1 : 0.7)
+        const g = grit(u, v)
+        const m = mottle(u, v)
         const i = (y * w + x) * 4
-        if (dark > sheen * 0.6) {
-          d[i] = 6
-          d[i + 1] = 3
-          d[i + 2] = 1
-          d[i + 3] = Math.round(dark * 70)
+        if (joint < 3.2 + (g - 0.5) * 2) {
+          // mortar: dark and recessed
+          d[i] = 34
+          d[i + 1] = 26
+          d[i + 2] = 22
         } else {
-          d[i] = 255
-          d[i + 1] = 214
-          d[i + 2] = 160
-          d[i + 3] = Math.round(Math.min(1, sheen) * 13)
+          const t = tint[row * PER + col]
+          const k = 0.75 + 0.35 * m + (g - 0.5) * 0.22 - Math.max(0, 5 - joint) * 0.03
+          d[i] = Math.round((96 + 34 * t) * k)
+          d[i + 1] = Math.round((40 + 12 * t) * k)
+          d[i + 2] = Math.round((28 + 8 * t) * k)
         }
+        d[i + 3] = 255
       }
+    }
   })
 }
 
 /**
  * Cream stock: soft mottling and tooth, short pale and dark fibres lying
- * every which way, and a few specks — an uncoated poster paper. Meant at
+ * every which way, and a few specks — an uncoated menu card. Meant at
  * 160 x 160 CSS px over #f1e3c6.
  */
 export function paper() {
@@ -185,15 +189,15 @@ export function paper() {
 export const cssUrl = (u: string) => (u ? `url("${u}")` : 'none')
 
 /**
- * Publish the tiles as CSS custom properties on :root (--tx-walnut,
+ * Publish the tiles as CSS custom properties on :root (--tx-brick,
  * --tx-paper), in a <style> of their own — not on <html>'s inline style,
- * which the hero rewrites with its monogram rect.
+ * which the hero writes its glass rect to.
  */
-export function publishTextures(which: ('walnut' | 'paper')[]) {
-  let el = document.getElementById('gj-textures') as HTMLStyleElement | null
+export function publishTextures(which: ('brick' | 'paper')[]) {
+  let el = document.getElementById('glory-textures') as HTMLStyleElement | null
   if (!el) {
     el = document.createElement('style')
-    el.id = 'gj-textures'
+    el.id = 'glory-textures'
     document.head.appendChild(el)
   }
   const have = el.textContent ?? ''
@@ -201,7 +205,7 @@ export function publishTextures(which: ('walnut' | 'paper')[]) {
   for (const k of which) {
     const name = `--tx-${k}`
     if (have.includes(`${name}:`) || add.includes(`${name}:`)) continue
-    add += `${name}:${cssUrl(k === 'walnut' ? walnut() : paper())};`
+    add += `${name}:${cssUrl(k === 'brick' ? brick() : paper())};`
   }
   if (add) el.textContent = `${have}:root{${add}}`
 }

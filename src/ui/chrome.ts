@@ -1,78 +1,88 @@
 import type { Engine, EngineState } from '../core/Engine'
 import type { Frame } from '../core/types'
 import type { Sound } from './sound'
-import { BRAND, CONTACT, MICROCOPY } from '../content'
-import { WORDMARK, markSvg } from './mark'
+import { BRAND, HOURS, KITCHEN_HOURS, LINKS, MICROCOPY } from '../content'
+import { NAV_NAMES } from '../chapters/index'
+import { WORDMARK, roundelSvg } from './mark'
 import { holdInert, releaseInert } from './inert'
 import { mountRotateGate } from './rotate'
 import { bindScene, calmUi, holdScene, readMotion, releaseScene, rememberMotion } from './prefs'
 import { publishTextures } from './texture'
 
 /*
- * Persistent chrome — GREG JONES PROJECT: the woodwork at the edge of a
- * small warm room. Everything sits on small OPAQUE PLATES of dark walnut
- * edged like the guitar: a black binding with a cream purfling line just
- * inside it (never a blur over the canvas: backdrop-filter costs 15–25% of
- * the frame), so the 11px caps hold >= 4.5:1 over lamplight and dark room
- * alike. Warm dark scrims at the top and bottom edges settle the bands.
+ * Persistent chrome — GLORY BEER BAR & KITCHEN. Everything sits on small
+ * OPAQUE STOUT PLATES (never a blur over the canvas: backdrop-filter costs
+ * 15–25% of the frame), so the small type holds ≥ 4.5:1 over the dark bar
+ * and the bone-white cyclorama alike. Thin stout scrims settle the bands.
+ * The chrome owns the --safe-top / --safe-bottom bands; chapter copy never
+ * lives there.
  *
- *   top-left      the GJP monogram (the headstock's, cream, never tinted),
- *                 a cream purfling rule, and the wordmark: "Greg Jones" in
- *                 Fraunces over "PROJECT" in tracked mono caps (→ the start).
- *   top-right     Listen · Videos · Bio on one plate, each with a tiny
- *                 festoon BULB that lights for the chapter on screen, and
- *                 Menu (three strings) for the rest of the setlist — + "Get
- *                 in touch" (the bone hud-btn). ≤ 820px the plate folds into
- *                 one "Menu" button. Menu opens a full-screen dialog: the
- *                 SETLIST, a cream sheet taped up in the dark room, every
- *                 chapter a line on it (focus moves in, Tab is trapped,
- *                 Escape closes, the page behind is inert and the scene
- *                 pauses once covered; focus returns to the Menu that opened
- *                 it).
- *   bottom-left   Sound and Motion: a bulb, the name and a small BRASS SLIDE
- *                 SWITCH with a bone knob (aria-pressed buttons) — the knob
- *                 slides up to On and the bulb lights. Sound: On / Off (off by
- *                 default). Motion off sets engine.motion = false +
- *                 html.motion-off, is remembered (localStorage via prefs.ts)
- *                 and starts off under prefers-reduced-motion.
- *   bottom-right  "03 / 07 — Front Row · Videos" over a little FRETBOARD of
- *                 black Richlite: a white nut, nickel frets, six bronze
- *                 strings and one 24x24 cell per chapter (a button, named)
- *                 with a white dot — the chapter on screen lights its dot
- *                 amber, the ones behind you stay white, the ones ahead dim.
- *   The bottom band is one landmark (<aside> "Preferences and chapters"), so
- *   landmark navigation reaches Sound / Motion. The readout is NOT a live
- *   region (scrolling, a reader's cursor and each Tab into a chapter would
- *   queue "04 / 07 …" on top of the heading just reached); a quiet sr-only
- *   status names the chapter only after a pip / link was activated without
- *   moving focus to its heading (a tap, a click).
+ *   top-left      the red G ROUNDEL (the site icon, as vector) + "Glory" in
+ *                 Alfa Slab One over "Beer Bar & Kitchen" in mono caps
+ *                 (→ lands on the hero).
+ *   top-right     Bar · Kitchen · Events · Visit (NAV_NAMES) on one plate,
+ *                 each with a small amber dot that lights for the chapter on
+ *                 screen, then "Make a Reservation" (the Glory-red pill,
+ *                 external: Toast). ≤ 900 px the plate folds into one Menu
+ *                 button (the pill stays beside it down to 560 px). Menu opens
+ *                 a full-screen dialog on the brick wall: every chapter (as
+ *                 the tracklist), the
+ *                 reservation pill, the phone, the address (→ map) and the
+ *                 hours (focus moves in, Tab is trapped, Escape closes, the
+ *                 page behind is inert and the scene pauses once covered;
+ *                 focus returns to Menu).
+ *   bottom-left   Sound · Motion: small quiet switches (aria-pressed); a dot
+ *                 lights amber when on. Sound is off by default. Motion off
+ *                 sets engine.motion = false + html.motion-off, is remembered
+ *                 (prefs.ts) and starts off under prefers-reduced-motion.
+ *   bottom-right  the story as a record's TRACKLIST: a small spinning disc,
+ *                 "A3  The Kitchen · Kitchen", then one button per chapter
+ *                 (A1 … A4 | B1 … B3, a hairline between the sides; a
+ *                 hover/focus tag with its business name): the track playing
+ *                 is lit amber, the ones behind stay cream, the ones ahead dim.
+ *   The bottom band is one landmark (<aside> "Preferences and chapters"). The
+ *   readout is NOT a live region; a quiet sr-only status names the chapter
+ *   only after a pip / link was activated without moving focus (a click).
  *
  * API used by main.ts: createChrome(root, engine, sound) → { update(frame, state) }.
  * Navigation always uses engine.land(id) (lands on settled copy; long jumps cut).
  */
 
-/** Plain business names beside each chapter's poetic label. */
-const BUSINESS: Record<string, string> = {
-  hero: 'Home',
-  listen: 'Listen',
-  watch: 'Videos',
-  story: 'Bio',
-  gear: 'Gear',
-  contact: 'Contact',
+/** the primary nav on desktop (business names, in story order) */
+const NAV = ['taps', 'kitchen', 'events', 'visit']
+/** the story as a record's tracklist: side A is the first half (rounded up), side B the rest — A1 … A4, B1 … B3 */
+export const trackCode = (i: number, total: number) => {
+  const a = Math.ceil(total / 2)
+  return i < a ? `A${i + 1}` : `B${i - a + 1}`
 }
-const NAV = ['listen', 'watch', 'story']
-const pad = (n: number) => String(n).padStart(2, '0')
 const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
 
-/* glyphs (decorative): three strings, wound to plain (heavy → light gauge) / a crossed pair */
-const MENU_IC = `<svg class="ch-ic" viewBox="0 0 22 14" aria-hidden="true" focusable="false"><path d="M1 2.5h20" stroke-width="2.1"/><path d="M1 7h20" stroke-width="1.5"/><path d="M1 11.5h20" stroke-width="1"/></svg>`
-const CLOSE_IC = `<svg class="ch-ic" viewBox="0 0 22 14" aria-hidden="true" focusable="false"><path d="M6 1.5l10 11M16 1.5l-10 11" stroke-width="1.6"/></svg>`
+/** "Monday … Wednesday: 4pm - 2am" → [{ days: 'Mon – Wed', hours: '4pm - 2am' }, …] (runs of equal hours) */
+export function hoursSummary() {
+  const out: { days: string; hours: string }[] = []
+  let i = 0
+  while (i < HOURS.length) {
+    let j = i
+    while (j + 1 < HOURS.length && HOURS[j + 1].hours === HOURS[i].hours) j++
+    const a = HOURS[i].day.slice(0, 3)
+    const b = HOURS[j].day.slice(0, 3)
+    out.push({ days: i === j ? a : `${a} – ${b}`, hours: HOURS[i].hours })
+    i = j + 1
+  }
+  return out
+}
+
+/* glyphs (decorative) */
+const MENU_IC = `<svg class="ch-ic" viewBox="0 0 20 14" aria-hidden="true" focusable="false"><path d="M1 2h18M1 7h18M1 12h12"/></svg>`
+const CLOSE_IC = `<svg class="ch-ic" viewBox="0 0 20 14" aria-hidden="true" focusable="false"><path d="M5 1.5l10 11M15 1.5l-10 11"/></svg>`
+const EXT_IC = `<svg class="ch-ext" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M4 2h6v6M10 2L3 9"/></svg>`
+const NEW_TAB = `<span class="sr-only"> (opens in a new tab)</span>`
 
 export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   const slots = engine.slots
   const total = slots.length
   const indexOf = (id: string) => slots.findIndex(s => s.def.id === id)
-  const biz = (id: string, fallback = '') => BUSINESS[id] ?? fallback
+  const biz = (id: string, fallback = '') => NAV_NAMES[id] ?? fallback
   const first = slots[0]?.def.id ?? 'hero'
 
   // the rotate card (and the opaque menu) cover the picture: pause it
@@ -80,48 +90,49 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   bindScene(engine)
   mountRotateGate(shown => (shown ? holdScene('rotate') : releaseScene('rotate')))
 
-  // the walnut grain on the plates and the cream stock of the setlist
-  publishTextures(['walnut', 'paper'])
+  // the menu dialog's brick wall
+  publishTextures(['brick'])
 
   // ---------------------------------------------------------------- markup
 
-  const brandInner = `<span class="ch-mark" aria-hidden="true">${markSvg('ch-mark-svg')}</span><i class="ch-purf" aria-hidden="true"></i><span class="ch-brand-text" aria-hidden="true">${WORDMARK}</span>`
+  const brandInner = `<span class="ch-mark" aria-hidden="true">${roundelSvg('ch-mark-svg')}</span><span class="ch-brand-text" aria-hidden="true">${WORDMARK}</span>`
+  const reserve = (cls: string) =>
+    `<a class="hud-btn ${cls}" href="${esc(LINKS.reserve.url)}" target="_blank" rel="noopener" data-reserve><span>${esc(LINKS.reserve.label)}</span>${EXT_IC}${NEW_TAB}</a>`
 
-  const links =
-    NAV.filter(id => indexOf(id) >= 0)
-      .map(id => `<li><a class="ch-link" href="#${id}" data-go="${id}"><i class="ch-led" aria-hidden="true"></i><span>${biz(id)}</span></a></li>`)
-      .join('') +
-    // the rest of the setlist (Band, Gear, …) lives in the menu, on desktop too
-    `<li class="ch-more-li"><button class="ch-link ch-more" type="button" aria-expanded="false" aria-controls="ch-menu" aria-haspopup="dialog"><span>Menu</span>${MENU_IC}</button></li>`
+  const links = NAV.filter(id => indexOf(id) >= 0)
+    .map(id => `<li><a class="ch-link" href="#${id}" data-go="${id}"><i class="ch-led" aria-hidden="true"></i><span>${esc(biz(id))}</span></a></li>`)
+    .join('')
 
+  const sideA = Math.ceil(total / 2)
   const pips = slots
     .map(
       (s, i) =>
-        `<li><button type="button" class="ch-pip" data-go="${s.def.id}" aria-label="${pad(i + 1)}: ${esc(s.def.label)} (${esc(biz(s.def.id, s.def.label))})"><i class="ch-dot" aria-hidden="true"></i></button></li>`,
+        `<li${i === sideA ? ' class="ch-side-b"' : ''}><button type="button" class="ch-pip" data-go="${s.def.id}" aria-label="${trackCode(i, total)}: ${esc(biz(s.def.id, s.def.label))} (${esc(s.def.label)})"><span class="ch-trk" aria-hidden="true">${trackCode(i, total)}</span><span class="ch-tag" aria-hidden="true">${esc(biz(s.def.id, s.def.label))}</span></button></li>`,
     )
     .join('')
 
   const rows = slots
     .map(
       (s, i) =>
-        `<li><a class="ch-ml" href="#${s.def.id}" data-go="${s.def.id}" aria-label="${esc(biz(s.def.id, s.def.label))}, ${i + 1} of ${total}: ${esc(s.def.label)}">
-          <span class="ch-ml-n" aria-hidden="true">${pad(i + 1)}</span>
+        `<li><a class="ch-ml" href="#${s.def.id}" data-go="${s.def.id}" aria-label="${esc(biz(s.def.id, s.def.label))}, ${trackCode(i, total)}: ${esc(s.def.label)}">
+          <span class="ch-ml-n" aria-hidden="true">${trackCode(i, total)}</span>
           <span class="ch-ml-name" aria-hidden="true">${esc(biz(s.def.id, s.def.label))}</span>
           <span class="ch-ml-lab" aria-hidden="true">${esc(s.def.label)}</span>
         </a></li>`,
     )
     .join('')
 
+  const hours = hoursSummary()
+    .map(h => `<li><span>${esc(h.days)}</span><span>${esc(h.hours)}</span></li>`)
+    .join('')
+  const kitchen = KITCHEN_HOURS.map(h => `<li><span>${esc(h.day)}</span><span>${esc(h.hours)}</span></li>`).join('')
+
   let motionOn = readMotion()
-  // a toggle: a bulb, the name, a brass slide switch with a bone knob and its
-  // two engraved legends (On above, Off below) — the knob sits by the one
-  // that's lit; the button's name is the label, its state aria-pressed
+  // a quiet switch: a dot, the name, the state word (aria-pressed carries the state)
   const tgl = (kind: 'sound' | 'motion', extra = '') => {
     const on = kind === 'sound' ? sound.enabled : motionOn
     const k = kind === 'sound' ? MICROCOPY.audio : MICROCOPY.motion
-    const up = kind === 'sound' ? MICROCOPY.audioOn : MICROCOPY.motionOn
-    const down = kind === 'sound' ? MICROCOPY.audioOff : MICROCOPY.motionOff
-    return `<button class="ch-tgl ch-tgl--${kind}${extra}" type="button" data-${kind}-toggle aria-pressed="${on}"><i class="ch-bulb" aria-hidden="true"></i><span class="ch-tgl-k">${k}</span><i class="ch-sw" aria-hidden="true"><i class="ch-sw-knob"></i></i><span class="ch-tgl-lg" aria-hidden="true"><span class="ch-tgl-up">${up}</span><span class="ch-tgl-dn">${down}</span></span></button>`
+    return `<button class="ch-tgl ch-tgl--${kind}${extra}" type="button" data-${kind}-toggle aria-pressed="${on}"><i class="ch-dot" aria-hidden="true"></i><span class="ch-tgl-k">${esc(k)}</span><span class="ch-tgl-s" aria-hidden="true"><span class="ch-tgl-on">On</span><span class="ch-tgl-off">Off</span></span></button>`
   }
 
   root.innerHTML = `
@@ -132,34 +143,35 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
       <a class="ch-brand" href="#${first}" data-go="${first}" aria-label="${esc(BRAND.name)}, back to the start">${brandInner}</a>
       <nav class="ch-nav" aria-label="Primary">
         <ul class="ch-links">${links}</ul>
-        <a class="hud-btn ch-cta" href="#contact" data-go="contact" data-focus>Get in touch</a>
       </nav>
+      ${reserve('ch-cta')}
       <button class="ch-menu-btn" type="button" aria-expanded="false" aria-controls="ch-menu" aria-haspopup="dialog"><span>Menu</span>${MENU_IC}</button>
     </header>
 
     <aside class="ch-bottom" aria-label="Preferences and chapters">
       <div class="ch-prefs" role="group" aria-label="Preferences">${tgl('sound')}${tgl('motion')}</div>
       <div class="ch-read">
-        <p class="ch-read-line"><span class="ch-read-n"><b>01</b> / ${pad(total)}</span><span class="ch-read-sep" aria-hidden="true"> — </span><span class="ch-read-l"></span><span class="ch-read-b"></span></p>
-        <nav class="ch-pips" aria-label="Chapters"><ol class="ch-neck">${pips}</ol></nav>
+        <p class="ch-read-line"><i class="ch-disc" aria-hidden="true"></i><span class="ch-read-n"><b>A1</b></span><span class="ch-read-l"></span><span class="ch-read-b"></span></p>
+        <nav class="ch-pips" aria-label="Chapters"><ol class="ch-rail">${pips}</ol></nav>
         <p class="sr-only" role="status" data-ch-status></p>
       </div>
     </aside>
 
     <div class="ch-menu" id="ch-menu" role="dialog" aria-modal="true" aria-label="Menu" data-lenis-prevent hidden>
-      <div class="ch-menu-room" aria-hidden="true"></div>
+      <div class="ch-menu-wall" aria-hidden="true"></div>
       <div class="ch-menu-top">
         <span class="ch-brand ch-menu-brand" aria-hidden="true">${brandInner}</span>
         <button class="ch-menu-btn ch-menu-close" type="button"><span>Close</span>${CLOSE_IC}</button>
       </div>
       <div class="ch-menu-body">
-        <div class="ch-sheet">
-          <i class="ch-tape ch-tape--l" aria-hidden="true"></i><i class="ch-tape ch-tape--r" aria-hidden="true"></i>
-          <p class="ch-menu-k" aria-hidden="true"><span>Setlist</span><span class="ch-menu-k-b">${esc(MICROCOPY.signalEyebrow)}</span></p>
-          <nav class="ch-menu-nav" aria-label="Chapters"><ol class="ch-ml-list">${rows}</ol></nav>
-          <div class="ch-menu-foot">
-            <a class="hud-btn ch-menu-cta" href="${CONTACT.href}">Email Greg</a>
-            <a class="ch-menu-mail" href="${CONTACT.href}">${esc(BRAND.email)}</a>
+        <nav class="ch-menu-nav" aria-label="Chapters"><ol class="ch-ml-list">${rows}</ol></nav>
+        <div class="ch-menu-info">
+          ${reserve('ch-menu-cta')}
+          <p class="ch-mi"><span class="ch-mi-k">Call</span><a href="${esc(BRAND.phoneHref)}">${esc(BRAND.phone)}</a></p>
+          <p class="ch-mi"><span class="ch-mi-k">Find us</span><a href="${esc(BRAND.mapUrl)}" target="_blank" rel="noopener">${esc(BRAND.street)}<br>${esc(BRAND.city)}${NEW_TAB}</a></p>
+          <div class="ch-mi ch-mi-hours">
+            <h2 class="ch-mi-k">Hours</h2><ul class="ch-hours">${hours}</ul>
+            <h2 class="ch-mi-k">Kitchen</h2><ul class="ch-hours">${kitchen}</ul>
           </div>
         </div>
         <div class="ch-menu-prefs" role="group" aria-label="Preferences">${tgl('sound', ' ch-menu-tgl')}${tgl('motion', ' ch-menu-tgl')}</div>
@@ -173,8 +185,6 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   const bottom = $('.ch-bottom')
   const menu = $('.ch-menu')
   const menuBtn = $<HTMLButtonElement>('.ch-top .ch-menu-btn')
-  const moreBtn = $<HTMLButtonElement>('.ch-more')
-  const openers = [menuBtn, moreBtn]
   const menuClose = $<HTMLButtonElement>('.ch-menu-close')
   const navEls = [...root.querySelectorAll<HTMLAnchorElement>('.ch-link')]
   const pipEls = [...root.querySelectorAll<HTMLButtonElement>('.ch-pip')]
@@ -185,33 +195,37 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   const readL = $('.ch-read-l')
   const readB = $('.ch-read-b')
   const status = $('[data-ch-status]')
-  /** the room to name once we arrive (set by a pointer activation only) */
+  /** the chapter to name once we arrive (set by a pointer activation only) */
   let announceFor: string | null = null
   const say = (i: number) => {
     const d = slots[i]?.def
-    if (d) status.textContent = `${pad(i + 1)} of ${pad(total)}: ${d.label}, ${biz(d.id, d.label)}`
+    if (d) status.textContent = `${trackCode(i, total)}: ${biz(d.id, d.label)}, ${d.label}`
   }
 
   // ---------------------------------------------------------------- navigation
 
   root.addEventListener('click', e => {
-    const a = (e.target as Element).closest<HTMLElement>('[data-go]')
+    const t = e.target as Element
+    // the reservation pill leaves for Toast: a clink, then let it go
+    if (t.closest('[data-reserve]')) {
+      sound.blip(6)
+      return
+    }
+    const a = t.closest<HTMLElement>('[data-go]')
     if (!a || !root.contains(a)) return
     e.preventDefault()
     const id = a.dataset.go!
     const fromMenu = menuOpen && menu.contains(a)
     if (menuOpen) closeMenu(false)
-    sound.blip(a.matches('.ch-cta') ? 7 : Math.max(0, indexOf(id)))
+    sound.blip(Math.max(0, indexOf(id)))
     if (indexOf(id) >= 0) engine.land(id)
     // keyboard activation (detail 0) hands focus on to the chapter's heading
     // so the next Tab continues in the story; a tap in the menu returns focus
     // to Menu, the control that opened it
     const keyboard = e.detail === 0
-    const toHeading = keyboard && indexOf(id) >= 0 && (fromMenu || a.matches('.ch-link, .ch-pip, .ch-brand') || a.hasAttribute('data-focus'))
+    const toHeading = keyboard && indexOf(id) >= 0
     if (toHeading) engine.focusChapter(id)
-    else if (fromMenu) backTo().focus({ preventScroll: true })
-    // focus stayed on the control: name the room once the story gets there
-    // (the heading announces itself when it takes focus)
+    else if (fromMenu) menuBtn.focus({ preventScroll: true })
     status.textContent = ''
     announceFor = null
     if (!toHeading && indexOf(id) >= 0) {
@@ -250,22 +264,17 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
 
   let menuOpen = false
   let menuTimer = 0
-  /** the control that opened the menu (focus goes back to it; the other one if it's gone) */
-  let opener: HTMLButtonElement = menuBtn
-  const visible = (el: HTMLElement) => el.getClientRects().length > 0
-  const backTo = () => (visible(opener) ? opener : (openers.find(visible) ?? opener))
   const focusables = () =>
     [...menu.querySelectorAll<HTMLElement>('a[href], button')].filter(el => !el.hidden && el.getClientRects().length > 0)
-  const openMenu = (from: HTMLButtonElement) => {
+  const openMenu = () => {
     if (menuOpen) return
     menuOpen = true
-    opener = from
     clearTimeout(menuTimer)
     menu.hidden = false
     // flush the closed state so the dialog fades up
     void menu.offsetWidth
     ch.classList.add('is-menu')
-    for (const b of openers) b.setAttribute('aria-expanded', 'true')
+    menuBtn.setAttribute('aria-expanded', 'true')
     holdInert('menu', [
       document.getElementById('stages'),
       document.getElementById('track'),
@@ -275,7 +284,7 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
     ])
     engine.lenis?.stop()
     // the menu is opaque: hold the frame once it has covered the picture
-    menuTimer = window.setTimeout(() => menuOpen && holdScene('menu'), calmUi() ? 0 : 300)
+    menuTimer = window.setTimeout(() => menuOpen && holdScene('menu'), calmUi() ? 0 : 320)
     menu.scrollTop = 0
     const now = menuLinks[lastIndex] ?? menuLinks[0]
     now?.focus({ preventScroll: true })
@@ -286,7 +295,7 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
     menuOpen = false
     clearTimeout(menuTimer)
     ch.classList.remove('is-menu')
-    for (const b of openers) b.setAttribute('aria-expanded', 'false')
+    menuBtn.setAttribute('aria-expanded', 'false')
     releaseInert('menu')
     releaseScene('menu')
     engine.lenis?.start()
@@ -296,10 +305,11 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
       },
       calmUi() ? 0 : 260,
     )
-    if (restoreFocus) backTo().focus({ preventScroll: true })
+    if (restoreFocus) menuBtn.focus({ preventScroll: true })
   }
-  for (const b of openers) b.addEventListener('click', () => (menuOpen ? closeMenu() : openMenu(b)))
+  menuBtn.addEventListener('click', () => (menuOpen ? closeMenu() : openMenu()))
   menuClose.addEventListener('click', () => closeMenu())
+  // a link out of the dialog (reserve, map, phone) leaves the menu as it is
   // capture: the dialog's own trap runs ahead of the no-`inert` fallback in inert.ts
   window.addEventListener(
     'keydown',
@@ -319,6 +329,11 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
     },
     true,
   )
+  // the desktop layout has no Menu button: a menu left open by a resize closes
+  const wide = matchMedia('(min-width: 901px)')
+  const onWide = () => wide.matches && closeMenu(false)
+  if (typeof wide.addEventListener === 'function') wide.addEventListener('change', onWide)
+  else wide.addListener?.(onWide)
   // the static page took over (no GPU): let go of everything the menu held
   window.addEventListener('hark:fallback', () => closeMenu(false))
 
@@ -336,14 +351,15 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
         announceFor = null
         say(state.index)
       }
-      readN.textContent = pad(state.index + 1)
+      readN.textContent = trackCode(state.index, total)
       readL.textContent = slot.def.label
-      readB.textContent = ` · ${biz(id, slot.def.label)}`
-      pipEls.forEach((b, i) => {
-        b.classList.toggle('is-on', i === state.index)
-        b.classList.toggle('is-past', i < state.index)
-        if (i === state.index) b.setAttribute('aria-current', 'step')
-        else b.removeAttribute('aria-current')
+      const b = biz(id, '')
+      readB.textContent = b && b !== slot.def.label ? b : ''
+      pipEls.forEach((el, i) => {
+        el.classList.toggle('is-on', i === state.index)
+        el.classList.toggle('is-past', i < state.index)
+        if (i === state.index) el.setAttribute('aria-current', 'step')
+        else el.removeAttribute('aria-current')
       })
       navEls.forEach(a => {
         const on = a.dataset.go === id

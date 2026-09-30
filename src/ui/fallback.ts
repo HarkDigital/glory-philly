@@ -1,7 +1,8 @@
-import { BRAND, CONTACT, MICROCOPY } from '../content'
+import { BRAND, EVENTS, FEATURED_DISHES, LINKS, MASCOT, PEOPLE, PHOTOS } from '../content'
 import { CHAPTER_COPY_IDS, buildChapterCopy } from '../core/srContent'
-import { CHAPTERS } from '../chapters/index'
-import { WORDMARK, markSvg } from './mark'
+import { CHAPTERS, NAV_NAMES } from '../chapters/index'
+import { WORDMARK, roundelSvg } from './mark'
+import { hoursSummary } from './chrome'
 import { unmountRotateGate } from './rotate'
 import { releaseInert } from './inert'
 import { releaseScene } from './prefs'
@@ -10,20 +11,47 @@ import { publishTextures } from './texture'
 /*
  * The plain HTML version, for browsers without WebGL2 (and the last resort
  * if boot fails or the GPU context is gone for good): every chapter's copy,
- * in story order, visible — set as a GIG POSTER / SETLIST: one long sheet
- * of cream stock taped to the dark wall of the room. Fraunces for the
- * headlines, the last word of each in the Caveat hand in barn red (a note
- * on a setlist), Instrument Sans for the words, Spline Sans Mono for the
- * small print. Each chapter is a numbered line of the setlist ("03", its
- * name in the hand, a marker rule); numbered lists (the story beats) carry
- * the setlist's numbers. The GJP monogram sits cream on a little black
- * headstock badge, as on the guitar. The numbers, rules, tape and the
- * colophon are decorative (aria-hidden or plainly not claims); the copy is
- * the live site's, verbatim, from srContent (buildChapterCopy). Links stay
- * underlined. Nothing here moves. Landmarks: the header (banner, with the
- * Primary nav) and the footer (contentinfo) sit beside <main> (#track),
- * which holds only the chapters.
+ * in story order, visible — set like Glory itself: cream type on stout
+ * black, Alfa Slab One headings (the painted wall sign), the accent word in
+ * Instrument Serif italic in beer amber, Inter Tight for reading, IBM Plex
+ * Mono for the small print, the red G roundel as the stamp. Each chapter is a
+ * numbered room ("03 · The Kitchen") on the brick; the house's own photos sit
+ * where they belong (the wall sign on the welcome, the plates beside the
+ * menu, the crew beside their bios, the room beside the events). The copy is
+ * the live site's, verbatim, from srContent (buildChapterCopy); photo alt
+ * text is the dish / person name from content.ts. Links stay underlined.
+ * Nothing here moves. Landmarks: the header (banner, with the Primary nav)
+ * and the footer (contentinfo) sit beside <main> (#track), which holds only
+ * the chapters.
  */
+
+const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
+const img = (src: string, alt: string, cls = '') =>
+  `<img class="fb-img ${cls}" src="${esc(src)}" alt="${esc(alt)}" loading="lazy" decoding="async">`
+
+/** the photos for each room (rendered beside / inside its copy) */
+function photosFor(id: string): string {
+  switch (id) {
+    case 'hero':
+      return `<figure class="fb-hero-fig">${img(PHOTOS.wallSign, `${BRAND.name}: the painted wall sign, “${BRAND.motto}”`, 'fb-hero-img')}</figure>`
+    case 'kitchen':
+      return `<div class="fb-plates">${FEATURED_DISHES.slice(0, 6)
+        .map(d => `<figure class="fb-plate">${img(d.photo!, d.name)}<figcaption>${esc(d.name)}</figcaption></figure>`)
+        .join('')}</div>`
+    case 'cellar':
+      return `<figure class="fb-side-fig">${img(PHOTOS.diningRoom, `The dining room at ${BRAND.name}`)}</figure>`
+    case 'events':
+      return `<div class="fb-strip">${EVENTS.photos
+        .slice(0, 4)
+        .map((p, i) => img(p, `${EVENTS.title}, photo ${i + 1} of ${EVENTS.photos.length}`))
+        .join('')}</div>`
+    case 'visit':
+      return `<figure class="fb-side-fig">${img(PHOTOS.sidewalk, `A sidewalk table outside ${BRAND.name}, ${BRAND.street}`)}</figure>`
+    default:
+      return ''
+  }
+}
+
 export function renderFallback(root: HTMLElement) {
   document.documentElement.classList.add('no-webgl')
   document.documentElement.classList.remove('is-rotate', 'motion-off')
@@ -40,48 +68,42 @@ export function renderFallback(root: HTMLElement) {
   root.style.pointerEvents = 'auto'
   root.inert = false
   root.removeAttribute('aria-hidden')
-  publishTextures(['paper'])
+  publishTextures(['brick', 'paper'])
 
   // landmarks: the header (banner) and footer (contentinfo) are <body>'s own
   // children, around <main> (#track), which holds only the chapters
   document.querySelectorAll('body > .fb-top, body > .fb-foot').forEach(n => n.remove())
   const has = (id: string) => CHAPTERS.some(c => c.id === id) && CHAPTER_COPY_IDS.includes(id)
-  const nav = [
-    ['listen', 'Listen'],
-    ['watch', 'Videos'],
-    ['story', 'Bio'],
-    ['gear', 'Gear'],
-  ]
-    .filter(([id]) => has(id))
-    .map(([id, name]) => `<a href="#${id}">${name}</a>`)
+  const nav = ['taps', 'kitchen', 'events', 'visit']
+    .filter(has)
+    .map(id => `<a href="#${id}">${esc(NAV_NAMES[id] ?? id)}</a>`)
     .join('')
   const header = document.createElement('header')
-  header.className = 'fb-top fb-band'
+  header.className = 'fb-top'
   header.innerHTML = `
-    <i class="fb-tape fb-tape--l" aria-hidden="true"></i><i class="fb-tape fb-tape--r" aria-hidden="true"></i>
-    <a class="fb-brand" href="#hero" aria-label="${BRAND.name}, top of the page">
-      <span class="fb-mark" aria-hidden="true">${markSvg('fb-mark-svg')}</span>
+    <a class="fb-brand" href="#hero" aria-label="${esc(BRAND.name)}, top of the page">
+      <span class="fb-mark" aria-hidden="true">${roundelSvg('fb-mark-svg')}</span>
       <span class="fb-brand-text" aria-hidden="true">${WORDMARK}</span>
     </a>
     <nav class="fb-nav" aria-label="Primary">
       ${nav}
-      <a class="fb-cta" href="${has('contact') ? '#contact' : CONTACT.href}">Get in touch</a>
+      <a class="fb-cta" href="${esc(LINKS.reserve.url)}" target="_blank" rel="noopener">${esc(LINKS.reserve.label)}<span class="sr-note"> (opens in a new tab)</span></a>
     </nav>`
   const footer = document.createElement('footer')
-  footer.className = 'fb-foot fb-band'
-  // a poster's colophon: what it is set in (true of this page), no claims
+  footer.className = 'fb-foot'
   footer.innerHTML = `
-    <span class="fb-mark fb-foot-mark" aria-hidden="true">${markSvg('fb-foot-svg')}</span>
-    <p class="fb-credit">${MICROCOPY.signalEyebrow}</p>
-    <p class="fb-colophon">Set in Fraunces, <em>Caveat</em>, Instrument Sans and Spline Sans Mono.</p>
-    <i class="fb-tape fb-tape--b" aria-hidden="true"></i>`
+    <span class="fb-mark fb-foot-mark" aria-hidden="true">${roundelSvg('fb-mark-svg')}</span>
+    <div class="fb-foot-body">
+      <p class="fb-foot-name">${esc(BRAND.name)}</p>
+      <p><a href="${esc(BRAND.mapUrl)}" target="_blank" rel="noopener">${esc(BRAND.street)}, ${esc(BRAND.city)}<span class="sr-note"> (opens in a new tab)</span></a> · <a href="${esc(BRAND.phoneHref)}">${esc(BRAND.phone)}</a></p>
+      <p class="fb-foot-hours">${hoursSummary()
+        .map(h => `${esc(h.days)} ${esc(h.hours)}`)
+        .join(' · ')}</p>
+    </div>
+    <figure class="fb-mascot">${img(MASCOT.photo, MASCOT.name)}</figure>`
   root.before(header)
   root.after(footer)
-  const rooms = CHAPTERS.filter(c => CHAPTER_COPY_IDS.includes(c.id)).length
-  root.innerHTML = `<div class="fb fb-band">
-    <p class="fb-kicker" aria-hidden="true"><i></i>The setlist · ${String(rooms).padStart(2, '0')}</p>
-    <div class="fb-main" id="fb-main" tabindex="-1"></div>
-  </div>`
+  root.innerHTML = `<div class="fb"><div class="fb-main" id="fb-main" tabindex="-1"></div></div>`
 
   // a fresh skip link: the live one's handler focuses a chapter heading that is gone
   const skip = document.querySelector<HTMLAnchorElement>('.skip-link')
@@ -106,30 +128,29 @@ export function renderFallback(root: HTMLElement) {
       span.textContent = a.textContent
       a.replaceWith(span)
     })
-    // "Listen", "Get in touch", "Back to top": plain in-page links here (a
-    // clone drops the handler that would steer a story that may be gone)
+    // "See the menu", "Back to top": plain in-page links here (a clone drops
+    // the handler that would steer a story that may be gone)
     copy.querySelectorAll<HTMLAnchorElement>('a[data-land]').forEach(a => {
       const plain = a.cloneNode(true) as HTMLAnchorElement
       plain.removeAttribute('data-land')
       plain.removeAttribute('data-anchor')
       a.replaceWith(plain)
     })
-    accentHeading(copy)
-    // the setlist's numbers for numbered lists — story beats and track
-    // listings (decorative: the <ol> already says it)
-    copy.querySelectorAll('ol > li').forEach(li => {
-      const n = document.createElement('span')
-      n.className = 'fb-n'
-      n.setAttribute('aria-hidden', 'true')
-      n.textContent = String([...li.parentElement!.children].indexOf(li) + 1).padStart(2, '0')
-      const h = li.querySelector(':scope > h3')
-      if (h) h.prepend(n)
-      else {
-        li.classList.add('fb-track')
-        li.parentElement!.classList.add('fb-tracks')
-        li.prepend(n)
-      }
+    // the external reservation link reads as the red pill
+    copy.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(a => {
+      if (a.getAttribute('href') === LINKS.reserve.url) a.classList.add('fb-pill')
     })
+    accentHeading(copy)
+    // the crew: each bio gets its portrait
+    if (id === 'people')
+      copy.querySelectorAll('h3').forEach((h, k) => {
+        const p = PEOPLE[k]
+        if (!p) return
+        const fig = document.createElement('figure')
+        fig.className = 'fb-person'
+        fig.innerHTML = img(p.photo, `${p.name}, ${p.role}`)
+        h.before(fig)
+      })
     const sec = document.createElement('section')
     sec.className = `fb-room fb-room--${id}`
     sec.id = id
@@ -138,16 +159,28 @@ export function renderFallback(root: HTMLElement) {
       heading.id = `fb-${id}-title`
       sec.setAttribute('aria-labelledby', heading.id)
     }
-    // the setlist line (decorative): "03", then the chapter's name in the hand
+    // the room's number and name (decorative): "03 · The Kitchen"
     const label = CHAPTERS.find(c => c.id === id)?.label
-    const wall = document.createElement('p')
-    wall.className = 'fb-wall'
-    wall.setAttribute('aria-hidden', 'true')
-    wall.innerHTML = `<span class="fb-wall-n">${String(i + 1).padStart(2, '0')}</span>${label ? `<em>${label}</em>` : ''}<i></i>`
-    sec.appendChild(wall)
+    if (id !== 'hero') {
+      const wall = document.createElement('p')
+      wall.className = 'fb-wall'
+      wall.setAttribute('aria-hidden', 'true')
+      wall.innerHTML = `<span class="fb-wall-n">${String(i + 1).padStart(2, '0')}</span>${label ? `<span>${esc(label)}</span>` : ''}<i></i>`
+      sec.appendChild(wall)
+    }
     const body = document.createElement('div')
     body.className = 'fb-room-body'
     body.appendChild(copy)
+    const pics = photosFor(id)
+    if (pics) {
+      const holder = document.createElement('div')
+      holder.className = 'fb-pics'
+      holder.innerHTML = pics
+      if (id === 'hero') sec.appendChild(holder)
+      // the plates and the room right under their headline
+      else if ((id === 'kitchen' || id === 'events') && heading) heading.after(holder)
+      else body.appendChild(holder)
+    }
     sec.appendChild(body)
     main.appendChild(sec)
   })
@@ -155,9 +188,9 @@ export function renderFallback(root: HTMLElement) {
 }
 
 /**
- * The heading's last word becomes the accent: the Caveat hand in barn red
- * ("Greg Jones <em>Project</em>"). Only the markup changes; the heading
- * reads exactly as before.
+ * The heading's last word becomes the accent: Instrument Serif italic in
+ * beer amber ("All Day <em>Menu</em>"). Only the markup changes; the
+ * heading reads exactly as before.
  */
 function accentHeading(copy: HTMLElement) {
   const h = copy.querySelector<HTMLElement>('h1, h2')

@@ -2,17 +2,17 @@ import { holdInert, releaseInert } from './inert'
 import { MICROCOPY } from '../content'
 import { storeKey } from './prefs'
 import { publishTextures } from './texture'
+import { roundelSvg } from './mark'
 
 /*
- * Phone-landscape suggestion — GREG JONES PROJECT: a SETLIST TAPED UP in the
- * dark room. The card is a sheet of cream stock held by two strips of
- * masking tape, in the lamp's pool: a phone drawn in marker, turning upright
- * ONCE under a barn-red arrow (never a loop; simply upright under reduced
- * motion / Motion off). Beside it: "Turn your phone upright" (Fraunces;
- * "upright" is the Caveat hand), "This stage is set for portrait." and
- * "Continue anyway" (an ink plate). The scene is paused underneath
- * (createChrome wires onChange to the scene hold). Tablets and laptops in
- * landscape are taller than 500px and never see it.
+ * Phone-landscape suggestion — GLORY: a cream MENU CARD propped on the dark
+ * bar, the red G roundel stamped in its corner. On it: a phone drawn in
+ * ink, turning upright ONCE under a Glory-red arrow (never a loop; simply
+ * upright under reduced motion / Motion off), then MICROCOPY.rotate in Alfa
+ * Slab One, MICROCOPY.rotateBody, and "Continue anyway" (the red pill). The
+ * scene is paused underneath (createChrome wires onChange to the scene
+ * hold). Tablets and laptops in landscape are taller than 500px and never
+ * see it.
  *
  * It is a suggestion, never a lock (WCAG 1.3.4): "Continue anyway" (or
  * Escape, as a dialog promises) releases it for the rest of the session. It
@@ -46,7 +46,7 @@ const rememberDismissed = () => {
   }
 }
 
-/* the drawing (0..110 × 0..132): a phone in marker under a curved arrow; the
+/* the drawing (0..110 × 0..132): a phone in ink under a curved arrow; the
    phone turns upright once (.rot-phone rotates about its centre) */
 const ART = `<svg class="rot-draw" viewBox="0 0 110 132" aria-hidden="true" focusable="false">
   <g class="rot-arrow">
@@ -79,7 +79,7 @@ export function mountRotateGate(onChange?: (shown: boolean) => void) {
   }
   if (typeof matchMedia === 'undefined') return
   let dismissed = wasDismissed()
-  // the sheet's cream stock
+  // the card's cream stock
   publishTextures(['paper'])
   const el = document.createElement('div')
   el.className = 'rot'
@@ -90,12 +90,12 @@ export function mountRotateGate(onChange?: (shown: boolean) => void) {
   el.tabIndex = -1
   el.innerHTML = `
     <div class="rot-card">
-      <i class="rot-tape rot-tape--l" aria-hidden="true"></i><i class="rot-tape rot-tape--r" aria-hidden="true"></i>
+      <span class="rot-stamp" aria-hidden="true">${roundelSvg('rot-stamp-svg')}</span>
       <div class="rot-art" aria-hidden="true">${ART}</div>
       <div class="rot-text">
         <p class="rot-k" aria-hidden="true">${MICROCOPY.signalEyebrow}</p>
-        <h2 class="rot-title" id="rot-title">Turn your phone <em>upright</em></h2>
-        <p class="rot-sub" id="rot-sub">This stage is set for portrait.</p>
+        <h2 class="rot-title" id="rot-title">${MICROCOPY.rotate}</h2>
+        <p class="rot-sub" id="rot-sub">${MICROCOPY.rotateBody}</p>
         <p class="rot-actions"><button class="hud-btn rot-go" type="button">Continue anyway</button></p>
       </div>
     </div>
@@ -137,7 +137,7 @@ export function mountRotateGate(onChange?: (shown: boolean) => void) {
       // changes after it is shown)
       if (keep)
         window.setTimeout(() => {
-          if (on) live.textContent = 'Turn your phone upright. This stage is set for portrait.'
+          if (on) live.textContent = `${MICROCOPY.rotate}. ${MICROCOPY.rotateBody}`
         }, 60)
     } else {
       releaseInert('rotate')
