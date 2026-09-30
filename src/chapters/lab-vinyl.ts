@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import type { Chapter, ChapterContext, Frame, CameraPose } from '../core/types'
 import { BOTTLES, BRAND, FEATURED_DISHES, MENU } from '../content'
-import { makeBarTop } from '../kit/bar'
+import { makeBarTop, makeBrickWall } from '../kit/bar'
+import { walnutMap } from '../kit/vinyl/materials'
 import {
   CrateRig,
   SEVEN,
@@ -12,10 +13,14 @@ import {
   dirOf,
   frameTo,
   labelTexture,
+  leanAgainst,
   makeCrate,
+  makeLedge,
   makeRecord,
   makeSleeve,
   makeTurntable,
+  planeClearance,
+  standOnLedge,
   syncVinylLights,
   tracklistTexture,
   type PaperName,
@@ -26,6 +31,9 @@ import {
  * screenshots and for the chapter agents to see every part lit by the world.
  *
  *   ?lab=vinyl&view=all|tt|arm|rim|bin|crate|back|single   camera
+ *   ?lab=vinyl&view=lean                            sleeves leaning on the brick via leanAgainst() (yaw 0.06 like the hero's, and a hard -0.2)
+ *   ?lab=vinyl&view=corner&c=0..3                   grazing close-up of each corner of the hard-yaw sleeve (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right)
+ *   ?lab=vinyl&view=ledge                           an LP face-out on a steel ledge on a walnut column (standOnLedge, ref4)
  *   ?lab=vinyl&mood=cyc                            the bone cyclorama instead of the bar after dark
  *   ?lab=vinyl&finish=black&cover=0.6              the black-satin deck, dust cover open 0..1
  *
@@ -38,6 +46,12 @@ const VIEW = params.get('view') ?? 'all'
 const CYC = params.get('mood') === 'cyc'
 
 const PAPERS: PaperName[] = ['cream', 'red', 'stout', 'cream', 'red']
+/** the brick behind the bar top (its face), and a walnut column standing on it */
+const WALL_Z = -1.55
+const COL = { x: 3.8, w: 1.5, d: 0.36 }
+const CORNER = Number(params.get('c') ?? 0)
+/** where the two leaning sleeves stand (left of the deck, clear of the lab's other props) */
+const LEAN_X = [-4.1, -2.85]
 
 class LabVinyl implements Chapter {
   id = 'hero'
@@ -128,7 +142,61 @@ class LabVinyl implements Chapter {
     r7.group.position.set(0.19, SEVEN / 2, 0)
     single.group.add(r7.group)
     this.single = single.group
+
+    // THE ROOM'S BACK: a brick wall behind the bar top, a walnut column on it
+    const wall = makeBrickWall(12, 4.2, { bump: 0.7, tint: '#a08a80' })
+    wall.position.set(0, 2.1 - 0.2, WALL_Z)
+    this.group.add(wall)
+    const colGeo = new THREE.BoxGeometry(COL.w, 4.2, COL.d)
+    {
+      // grain runs up the column's wide vertical boards
+      const pos = colGeo.attributes.position as THREE.BufferAttribute
+      const nrm = colGeo.attributes.normal as THREE.BufferAttribute
+      const uv = colGeo.attributes.uv as THREE.BufferAttribute
+      for (let i = 0; i < uv.count; i++) {
+        const across = Math.abs(nrm.getX(i)) > 0.5 ? pos.getZ(i) : pos.getX(i)
+        uv.setXY(i, pos.getY(i) / 2.6, across / 0.7 + 0.3)
+      }
+    }
+    const column = new THREE.Mesh(colGeo, new THREE.MeshStandardMaterial({ map: walnutMap(), roughness: 0.55, color: '#d9c2b0' }))
+    column.position.set(COL.x, 2.1 - 0.2, WALL_Z + COL.d / 2)
+    column.receiveShadow = true
+    column.castShadow = true
+    this.group.add(column)
+
+    // two sleeves leaning on the brick, posed by leanAgainst (never through it):
+    // the hero's own numbers (lean 0.11, yaw 0.06) and a hard yaw
+    const lean1 = makeSleeve({
+      front: coverTexture({ title: BRAND.short, sub: BRAND.motto, kicker: 'Glory Records', cat: catNo(1), photoUrl: 'photos/wall-sign.webp', focus: [0.3, 0.3], eager: true }),
+      seed: 4,
+    })
+    const lean2 = makeSleeve({ front: coverTexture({ title: 'On Tap', sub: 'Drafts', kicker: 'The Bar', cat: catNo(2), paper: 'red' }), seed: 7 })
+    for (const sl of [lean1, lean2]) {
+      sl.mesh.castShadow = true
+      this.group.add(sl.group)
+    }
+    const p1 = leanAgainst(lean1, { wallZ: WALL_Z, floorY: 0, x: LEAN_X[0], lean: 0.11, yaw: 0.06 })
+    const p2 = leanAgainst(lean2, { wallZ: WALL_Z, floorY: 0, x: LEAN_X[1], lean: 0.14, yaw: -0.2, roll: 0.02 })
+    this.leaning = lean2.group
+    // an LP face-out on a small steel ledge on the column (ref4)
+    const ledge = makeLedge({ width: 0.92 })
+    ledge.group.position.set(COL.x, 1.45, WALL_Z + COL.d)
+    this.group.add(ledge.group)
+    const lp = makeSleeve({ front: coverTexture({ title: 'Old City', sub: BRAND.street, kicker: 'Philadelphia', cat: catNo(3), paper: 'stout' }), seed: 12 })
+    lp.mesh.castShadow = true
+    this.group.add(lp.group)
+    const p3 = standOnLedge(lp, ledge.update(), { lean: 0.12, yaw: 0.03 })
+    this.ledgeLp = lp.group
+    const wallPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -WALL_Z)
+    const colPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -(WALL_Z + COL.d))
+    this.group.updateMatrixWorld(true)
+    console.log(
+      `[lab] leanAgainst gaps: ${p1.gap.toFixed(4)} / ${p2.gap.toFixed(4)} (planeClearance ${planeClearance(lean1, wallPlane).toFixed(4)} / ${planeClearance(lean2, wallPlane).toFixed(4)}); ` +
+        `ledge: lean ${p3.lean.toFixed(3)} foot ${p3.foot.toFixed(4)} fits ${p3.fits} clearance ${planeClearance(lp, colPlane).toFixed(4)}`,
+    )
   }
+  private leaning!: THREE.Object3D
+  private ledgeLp!: THREE.Object3D
   private listSleeve!: THREE.Object3D
   private single!: THREE.Object3D
 
@@ -216,6 +284,27 @@ class LabVinyl implements Chapter {
       c.set(0, 0.5, 0).applyMatrix4(this.listSleeve.matrixWorld)
       dirOf(-7, 8, d)
       frameTo(out, c, d, 1.05, 1.05, full, W, H, fov)
+    } else if (VIEW === 'lean') {
+      c.set((LEAN_X[0] + LEAN_X[1]) / 2, 0.55, WALL_Z + 0.2)
+      dirOf(14, 14, d)
+      frameTo(out, c, d, portrait ? 2.3 : 2.8, 1.3, full, W, H, fov)
+    } else if (VIEW === 'corner') {
+      // graze along the brick at one corner of the hard-yaw sleeve: the gap to the wall is the proof
+      this.leaning.updateWorldMatrix(true, false)
+      const cx = CORNER % 2 ? 0.5 : -0.5
+      const cy = CORNER < 2 ? 1 : 0
+      c.set(cx, cy, -0.007).applyMatrix4(this.leaning.matrixWorld)
+      // as the site's cameras see a leaning sleeve: from the front, a little off to the side,
+      // close on the corner — a clipped corner shows as brick where the corner should be
+      if (CORNER < 2) dirOf(cx < 0 ? 22 : -22, 16, d)
+      else dirOf(cx < 0 ? 28 : -28, 10, d)
+      out.fov = 24
+      frameTo(out, c, d, 0.3, 0.2, full, W, H, 24)
+    } else if (VIEW === 'ledge') {
+      this.ledgeLp.updateWorldMatrix(true, false)
+      c.set(0, 0.42, 0).applyMatrix4(this.ledgeLp.matrixWorld)
+      dirOf(-24, 10, d)
+      frameTo(out, c, d, 2.2, 1.9, full, W, H, fov)
     } else if (VIEW === 'single') {
       this.single.updateWorldMatrix(true, false)
       c.set(0.1, SEVEN * 0.5, 0).applyMatrix4(this.single.matrixWorld)

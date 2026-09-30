@@ -31,18 +31,41 @@ export function placeholderTexture(color = '#1a1d24'): THREE.Texture {
   return t
 }
 
+export interface LoadScreenshotOpts {
+  /** output width in px (default 800) */
+  width?: number
+  /**
+   * keep the photo's own aspect ratio (height = width × h/w of the source).
+   * Default false: the texture is 16:10 (width × 0.625), as the site's
+   * screen-shaped callers expect. Either way `texture.userData.aspect` is w/h.
+   */
+  keepAspect?: boolean
+}
+
 /**
  * Load an image as a texture, decoded off the main thread and resized to
- * `width` (height keeps the aspect ratio). Rejects on network errors.
+ * `width` — 16:10 by default, or the photo's own aspect with `keepAspect`.
+ * Rejects on network errors.
+ *
+ *   loadScreenshot('photos/wall-sign.webp', { width: 1024, keepAspect: true })
+ *     .then(t => { mat.map = t; mesh.scale.y = 1 / t.userData.aspect })
  */
-export async function loadScreenshot(url: string, { width = 800 } = {}): Promise<THREE.Texture> {
+export async function loadScreenshot(url: string, { width = 800, keepAspect = false }: LoadScreenshotOpts = {}): Promise<THREE.Texture> {
   let source: CanvasImageSource
   let w = width
   let h = Math.round(width * 0.625)
   try {
     const blob = await (await fetch(url)).blob()
-    const bmp = await createImageBitmap(blob, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' })
-    source = bmp
+    if (keepAspect) {
+      // width only: the decoder keeps the aspect (and if a browser ignores the
+      // hint, the bitmap's own size still gives it)
+      const bmp = await createImageBitmap(blob, { resizeWidth: w, resizeQuality: 'high' })
+      h = Math.max(1, Math.round((w * bmp.height) / bmp.width))
+      source = bmp
+    } else {
+      const bmp = await createImageBitmap(blob, { resizeWidth: w, resizeHeight: h, resizeQuality: 'high' })
+      source = bmp
+    }
   } catch {
     const img = new Image()
     img.src = url
@@ -58,6 +81,7 @@ export async function loadScreenshot(url: string, { width = 800 } = {}): Promise
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 4
+  tex.userData.aspect = w / h
   // once on the GPU the canvas is dead weight (~2.6 MB each): shrink it. A lost
   // context reloads the page, so nothing ever needs to re-upload it.
   tex.onUpdate = () => {

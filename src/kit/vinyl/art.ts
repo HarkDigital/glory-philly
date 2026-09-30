@@ -6,9 +6,13 @@ import { BRAND } from '../../content'
  * GLY-001…), sleeve fronts (a full-bleed photo with a title band, or a
  * typographic cover), sleeve backs as TRACKLISTS (auto-fit, split across
  * sides/columns), 7" company sleeves with a die-cut centre, and the paper
- * inner sleeve. Drawn with 2D canvas in the site's faces:
- *   Alfa Slab One (display) · Inter Tight (reading) · Instrument Serif italic
- *   (the accent) · Inter Tight caps (numbers, prices, catalogue lines).
+ * inner sleeve. Drawn with 2D canvas in the site's two faces (Mike's rules:
+ * no italic serif, no IBM Plex Mono, anywhere):
+ *   Alfa Slab One — titles only (the painted wall sign's slab)
+ *   Inter Tight 400–700 — everything else: subs and notes in sentence case,
+ *   labels / catalogue lines / numbers / prices in tracked caps.
+ * "33⅓" is set from Inter Tight's own figures (fillText() below): the web
+ * font subset has no fraction glyphs, so the browser would fall back.
  * Paper grain, ring wear and scuffs are added by the sleeve shader, so these
  * canvases are pure type and layout. Every draw function takes (ctx, x0, y0,
  * size, spec) so it can also paint one cell of an atlas.
@@ -18,9 +22,11 @@ import { BRAND } from '../../content'
  */
 
 export const FONT = {
+  /** titles */
   display: '"Alfa Slab One", Rockwell, Georgia, serif',
+  /** everything else (400–700) */
   sans: '"Inter Tight Variable", "Inter Tight", system-ui, sans-serif',
-  serif: '"Instrument Serif", Georgia, serif',
+  /** labels, numbers, prices (tracked caps) — the same face; the old mono slot, kept so chapters' FONT.mono still works */
   mono: '"Inter Tight Variable", "Inter Tight", system-ui, sans-serif',
 }
 
@@ -65,6 +71,9 @@ export function scheme(p: PaperName | undefined): Scheme {
 /** The house label's rim line (decorative; built from BRAND). */
 export const RIM_TEXT = `${BRAND.name.toUpperCase()} · 126 CHESTNUT ST · ${BRAND.neighborhood.toUpperCase()} PHILADELPHIA · `
 
+/** the motto as the sign sets it: caps, no full stop ("THIS MUST BE THE PLACE") */
+const mottoCaps = () => BRAND.motto.replace(/[.!]+$/, '').toUpperCase()
+
 /** "GLY-001" */
 export const catNo = (n: number) => `GLY-${String(n).padStart(3, '0')}`
 
@@ -76,16 +85,10 @@ export function loadVinylFonts(): Promise<void> {
   if (fontsPromise) return fontsPromise
   const fonts = document.fonts
   if (!fonts?.load) return (fontsPromise = Promise.resolve())
-  const faces = [
-    `400 40px ${FONT.display}`,
-    `500 40px ${FONT.sans}`,
-    `650 40px ${FONT.sans}`,
-    `900 40px ${FONT.sans}`,
-    `italic 400 40px ${FONT.serif}`,
-    `500 20px ${FONT.mono}`,
-    `400 20px ${FONT.mono}`,
-  ]
-  const all = Promise.all(faces.map(f => fonts.load(f, 'Glory 33⅓ – G').catch(() => []))).then(() => undefined)
+  // exactly the faces the canvases draw with; the sample text pulls in the
+  // latin AND latin-ext subsets (beer names: "Šariš", "Łomża"…)
+  const faces = [`400 40px ${FONT.display}`, ...[400, 500, 600, 700].map(w => `${w} 40px ${FONT.sans}`)]
+  const all = Promise.all(faces.map(f => fonts.load(f, 'Glory 33 – G ĀŁŠ').catch(() => []))).then(() => undefined)
   const timeout = new Promise<void>(r => setTimeout(r, 4000))
   fontsPromise = Promise.race([all, timeout])
   return fontsPromise
@@ -116,6 +119,70 @@ type Ctx = CanvasRenderingContext2D
 
 const track = (ctx: Ctx, px: number) => {
   ;(ctx as Ctx & { letterSpacing?: string }).letterSpacing = `${px}px`
+}
+
+/** a sub / note line: Inter Tight, sentence case */
+export const subFont = (px: number, weight = 500) => `${weight} ${px}px ${FONT.sans}`
+/** a label: Inter Tight caps (pair with tracking) */
+export const capsFont = (px: number, weight = 600) => `${weight} ${px}px ${FONT.sans}`
+
+const FRAC = '⅓'
+const pxOf = (font: string) => {
+  const m = /(\d+(?:\.\d+)?)px/.exec(font)
+  return m ? parseFloat(m[1]) : 16
+}
+/** width of `text` at the current font, "⅓" measured the way fillText() sets it */
+export function measure(ctx: Ctx, text: string): number {
+  if (!text.includes(FRAC)) return ctx.measureText(text).width
+  const font = ctx.font
+  const px = pxOf(font)
+  const parts = text.split(FRAC)
+  let w = parts.reduce((a, p) => a + ctx.measureText(p).width, 0)
+  ctx.font = font.replace(/(\d+(?:\.\d+)?)px/, `${(px * 0.62).toFixed(2)}px`)
+  w += (parts.length - 1) * (ctx.measureText('1').width + ctx.measureText('3').width + px * 0.14)
+  ctx.font = font
+  return w
+}
+/**
+ * ctx.fillText that honours textAlign and sets "⅓" from the face's own
+ * figures (a raised 1, a fraction slash, a 3) so it never falls back.
+ */
+export function fillText(ctx: Ctx, text: string, x: number, y: number) {
+  if (!text.includes(FRAC)) {
+    ctx.fillText(text, x, y)
+    return
+  }
+  const font = ctx.font
+  const align = ctx.textAlign
+  const px = pxOf(font)
+  const small = font.replace(/(\d+(?:\.\d+)?)px/, `${(px * 0.62).toFixed(2)}px`)
+  const total = measure(ctx, text)
+  let cx = align === 'right' || align === 'end' ? x - total : align === 'center' ? x - total / 2 : x
+  ctx.textAlign = 'left'
+  const parts = text.split(FRAC)
+  parts.forEach((p, i) => {
+    ctx.font = font
+    ctx.fillText(p, cx, y)
+    cx += ctx.measureText(p).width
+    if (i === parts.length - 1) return
+    ctx.font = small
+    ctx.fillText('1', cx, y - px * 0.3)
+    cx += ctx.measureText('1').width
+    // the fraction slash
+    ctx.save()
+    ctx.strokeStyle = ctx.fillStyle
+    ctx.lineWidth = Math.max(1, px * 0.075)
+    ctx.beginPath()
+    ctx.moveTo(cx + px * 0.01, y + px * 0.02)
+    ctx.lineTo(cx + px * 0.13, y - px * 0.72)
+    ctx.stroke()
+    ctx.restore()
+    cx += px * 0.14
+    ctx.fillText('3', cx, y)
+    cx += ctx.measureText('3').width
+  })
+  ctx.font = font
+  ctx.textAlign = align
 }
 
 /** Largest font size (<= px) at which `text` fits `maxW`. Sets ctx.font. */
@@ -177,7 +244,7 @@ function fitBlock(ctx: Ctx, text: string, font: (px: number) => string, maxPx: n
 /** Characters around a circle, clockwise from `start` (radians, 0 = right, -π/2 = top), filling the ring. */
 export function ringText(ctx: Ctx, text: string, cx: number, cy: number, R: number, px: number, color: string, start = -Math.PI / 2, font = FONT.mono) {
   ctx.save()
-  ctx.font = `500 ${px}px ${font}`
+  ctx.font = `600 ${px}px ${font}`
   track(ctx, 0)
   ctx.fillStyle = color
   ctx.textBaseline = 'alphabetic'
@@ -205,25 +272,31 @@ export function ringText(ctx: Ctx, text: string, cx: number, cy: number, R: numb
   ctx.restore()
 }
 
-/** The red-ring "G" roundel (the sign's stamp): white disc, red ring, heavy black G. */
+/** the site mark's G (src/ui/mark.ts, viewBox 0 0 100 100): one closed contour, no font needed */
+const G_PATH = 'M73.75 30.07A31 31 0 1 0 81 50V45H51V57H63.27A15 15 0 1 1 61.49 40.36Z'
+let gPath: Path2D | null = null
+
+/**
+ * The red-ring "G" roundel (the sign's stamp): white disc, red ring, heavy
+ * black G — the same drawing as the site's mark (disc radius r).
+ */
 export function drawRoundel(ctx: Ctx, cx: number, cy: number, r: number, opts: { disc?: string; ring?: string; g?: string } = {}) {
+  const k = r / 49
   ctx.save()
-  ctx.fillStyle = opts.disc ?? '#fbf8f2'
+  ctx.translate(cx - 50 * k, cy - 50 * k)
+  ctx.scale(k, k)
+  ctx.fillStyle = opts.disc ?? '#fffdf8'
   ctx.beginPath()
-  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.arc(50, 50, 49, 0, Math.PI * 2)
   ctx.fill()
   ctx.strokeStyle = opts.ring ?? INKS.red
-  ctx.lineWidth = r * 0.075
+  ctx.lineWidth = 3.4
   ctx.beginPath()
-  ctx.arc(cx, cy, r * 0.9, 0, Math.PI * 2)
+  ctx.arc(50, 50, 44.5, 0, Math.PI * 2)
   ctx.stroke()
-  ctx.fillStyle = opts.g ?? '#0f0d0c'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'alphabetic'
-  track(ctx, 0)
-  ctx.font = `900 ${r * 1.34}px ${FONT.sans}`
-  // optical centre: cap height ≈ 0.72 em
-  ctx.fillText('G', cx - r * 0.02, cy + r * 1.34 * 0.36)
+  ctx.fillStyle = opts.g ?? '#0d0806'
+  gPath ??= new Path2D(G_PATH)
+  ctx.fill(gPath)
   ctx.restore()
 }
 
@@ -306,7 +379,7 @@ export function artCanvas(w: number, h = w, fill = INKS.paper) {
 
 export interface LabelSpec {
   title: string
-  /** italic serif line under the title */
+  /** a line under the title (Inter Tight, sentence case) */
   sub?: string
   /** "SIDE A" */
   side?: string
@@ -365,45 +438,45 @@ export function drawLabel(ctx: Ctx, x0: number, y0: number, size: number, s: Lab
     // around the big hole (r ≈ 111 of 256): roundel above, title below, side | speed either side
     drawRoundel(ctx, c, c - u(160), u(34))
     track(ctx, u(2))
-    ctx.font = `500 ${u(15)}px ${FONT.mono}`
-    ctx.fillText(side, c - u(166), c + u(6))
-    ctx.fillText(`${rpm} RPM`, c + u(166), c + u(6))
+    ctx.font = capsFont(u(14.5))
+    fillText(ctx, side, c - u(166), c + u(6))
+    fillText(ctx, `${rpm} RPM`, c + u(166), c + u(6))
     track(ctx, 0)
     const tpx = fit(ctx, s.title, px => `400 ${px}px ${FONT.display}`, u(30), u(250), u(12))
     ctx.fillText(s.title, c, c + u(140) + tpx * 0.35)
     if (s.sub) {
       ctx.fillStyle = sc.muted
-      fit(ctx, s.sub, px => `italic 400 ${px}px ${FONT.serif}`, u(22), u(190), u(10))
-      ctx.fillText(s.sub, c, c + u(176) + tpx * 0.2)
+      fit(ctx, s.sub, px => subFont(px), u(18), u(200), u(10))
+      ctx.fillText(ellipsize(ctx, s.sub, u(200)), c, c + u(172) + tpx * 0.2)
     }
     if (s.cat) {
       ctx.fillStyle = sc.fg
       track(ctx, u(2))
-      ctx.font = `500 ${u(11)}px ${FONT.mono}`
+      ctx.font = capsFont(u(11))
       ctx.fillText(s.cat, c, c - u(118))
     }
   } else {
     drawRoundel(ctx, c, c - u(132), u(50))
     track(ctx, u(2.4))
-    ctx.font = `500 ${u(10.5)}px ${FONT.mono}`
+    ctx.font = capsFont(u(10.5))
     ctx.fillStyle = sc.muted
     ctx.fillText('GLORY RECORDS', c, c - u(66))
     ctx.fillStyle = sc.fg
     track(ctx, u(2.2))
-    ctx.font = `500 ${u(15)}px ${FONT.mono}`
-    ctx.fillText(side, c - u(112), c + u(5))
-    ctx.fillText(rpm, c + u(112), c + u(5))
+    ctx.font = capsFont(u(14.5))
+    fillText(ctx, side, c - u(112), c + u(5))
+    fillText(ctx, rpm, c + u(112), c + u(5))
     track(ctx, 0)
     const tpx = fit(ctx, s.title, px => `400 ${px}px ${FONT.display}`, u(38), u(300), u(14))
     ctx.fillText(s.title, c, c + u(62) + tpx * 0.35)
     if (s.sub) {
       ctx.fillStyle = sc.muted
-      fit(ctx, s.sub, px => `italic 400 ${px}px ${FONT.serif}`, u(26), u(270), u(12))
-      ctx.fillText(s.sub, c, c + u(102) + tpx * 0.35)
+      fit(ctx, s.sub, px => subFont(px), u(21), u(280), u(11))
+      ctx.fillText(ellipsize(ctx, s.sub, u(280)), c, c + u(98) + tpx * 0.35)
     }
     ctx.fillStyle = sc.fg
     track(ctx, u(2.4))
-    ctx.font = `500 ${u(12)}px ${FONT.mono}`
+    ctx.font = capsFont(u(11.5))
     ctx.fillText(`${s.cat ?? catNo(1)} · STEREO`, c, c + u(150))
   }
   track(ctx, 0)
@@ -415,10 +488,11 @@ export function drawLabel(ctx: Ctx, x0: number, y0: number, size: number, s: Lab
 
 export interface CoverSpec {
   title: string
+  /** a line under the title (Inter Tight, sentence case) */
   sub?: string
   /** "GLY-001" */
   cat?: string
-  /** small line above the title (mono), e.g. "THE KITCHEN" */
+  /** small line above the title (Inter Tight tracked caps), e.g. "THE KITCHEN" */
   kicker?: string
   /** a photo (any aspect; cover-cropped, never stretched). Without one: a typographic cover. */
   photo?: CoverSource | null
@@ -458,11 +532,11 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
     ctx.fillRect(0, 0, size, u(150))
     ctx.fillStyle = INKS.cream
     track(ctx, u(3.2))
-    ctx.font = `500 ${u(19)}px ${FONT.mono}`
+    ctx.font = capsFont(u(19))
     ctx.textAlign = 'left'
     ctx.fillText('GLORY RECORDS', u(44), u(62))
     ctx.textAlign = 'right'
-    ctx.fillText(`${cat} · 33⅓`, size - u(44), u(62))
+    fillText(ctx, `${cat} · 33⅓`, size - u(44), u(62))
     // band
     ctx.fillStyle = sc.paper
     ctx.fillRect(0, size - band, size, band)
@@ -472,23 +546,24 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
     drawRoundel(ctx, size - u(44) - R, size - band / 2 + u(4), R, s.paper === 'red' ? { ring: INKS.red } : {})
     ctx.textAlign = 'left'
     const tw = size - u(44) * 2 - R * 2 - u(36)
-    let ty = size - band + u(64)
+    // laid out from the foot up: sub, title, kicker
+    track(ctx, 0)
+    const tpx = fit(ctx, s.title, px => `400 ${px}px ${FONT.display}`, u(s.sub ? 70 : 78), tw, u(34))
+    const subY = size - u(36)
+    const titleY = s.sub ? subY - u(44) : size - u(s.kicker ? 50 : 70)
+    if (s.sub) {
+      ctx.fillStyle = sc.muted
+      fit(ctx, s.sub, px => subFont(px), u(29), tw, u(21))
+      ctx.fillText(ellipsize(ctx, s.sub, tw), u(45), subY)
+    }
+    ctx.fillStyle = sc.fg
+    ctx.font = `400 ${tpx}px ${FONT.display}`
+    ctx.fillText(s.title, u(42), titleY)
     if (s.kicker) {
       ctx.fillStyle = sc.accent === sc.fg ? sc.muted : sc.accent
       track(ctx, u(3))
-      ctx.font = `500 ${u(19)}px ${FONT.mono}`
-      ctx.fillText(ellipsize(ctx, s.kicker.toUpperCase(), tw), u(46), ty)
-      ty += u(12)
-    } else ty -= u(14)
-    ctx.fillStyle = sc.fg
-    track(ctx, 0)
-    const tpx = fit(ctx, s.title, px => `400 ${px}px ${FONT.display}`, u(76), tw, u(34))
-    ty += tpx * 0.86
-    ctx.fillText(s.title, u(42), ty)
-    if (s.sub) {
-      ctx.fillStyle = sc.muted
-      fit(ctx, s.sub, px => `italic 400 ${px}px ${FONT.serif}`, u(40), tw, u(20))
-      ctx.fillText(ellipsize(ctx, s.sub, tw), u(46), Math.min(size - u(26), ty + u(48)))
+      ctx.font = capsFont(u(19))
+      ctx.fillText(ellipsize(ctx, s.kicker.toUpperCase(), tw), u(45), titleY - tpx * 0.74 - u(20))
     }
   } else {
     // typographic cover: header rule, a big slab title, the record's rings bleeding off
@@ -514,7 +589,7 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
 
     ctx.fillStyle = sc.fg
     track(ctx, u(3))
-    ctx.font = `500 ${u(19)}px ${FONT.mono}`
+    ctx.font = capsFont(u(19))
     ctx.textAlign = 'left'
     ctx.fillText('GLORY RECORDS', m, u(76))
     ctx.textAlign = 'right'
@@ -525,8 +600,8 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
     if (s.kicker) {
       ctx.fillStyle = sc.accent === sc.fg ? sc.muted : sc.accent
       track(ctx, u(3.4))
-      ctx.font = `500 ${u(22)}px ${FONT.mono}`
-      ctx.fillText(s.kicker.toUpperCase(), m, y)
+      ctx.font = capsFont(u(22))
+      ctx.fillText(ellipsize(ctx, s.kicker.toUpperCase(), size - 2 * m), m, y)
       y += u(24)
     }
     ctx.fillStyle = sc.fg
@@ -538,14 +613,14 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
     }
     if (s.sub) {
       ctx.fillStyle = sc.muted
-      ctx.font = `italic 400 ${u(52)}px ${FONT.serif}`
-      const lines = wrap(ctx, s.sub, u(560)).slice(0, 3)
-      lines.forEach((l, i) => ctx.fillText(l, m, y + u(76) + i * u(56)))
+      ctx.font = subFont(u(38))
+      const lines = wrap(ctx, s.sub, u(540)).slice(0, 3)
+      lines.forEach((l, i) => ctx.fillText(l, m, y + u(72) + i * u(50)))
     }
     ctx.fillStyle = sc.fg
     track(ctx, u(2.6))
-    ctx.font = `500 ${u(17)}px ${FONT.mono}`
-    ctx.fillText('33⅓ RPM · STEREO', m, size - u(52))
+    ctx.font = capsFont(u(17))
+    fillText(ctx, '33⅓ RPM · STEREO', m, size - u(52))
   }
   track(ctx, 0)
   ctx.textAlign = 'left'
@@ -615,7 +690,7 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
   // header
   ctx.fillStyle = sc.fg
   track(ctx, u(2.8))
-  ctx.font = `500 ${u(18)}px ${FONT.mono}`
+  ctx.font = capsFont(u(18))
   ctx.textAlign = 'left'
   ctx.fillText(`${cat} · STEREO`, m, u(66))
   ctx.textAlign = 'right'
@@ -628,8 +703,8 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
   ctx.fillText(s.title, m - u(3), y)
   if (s.sub) {
     ctx.fillStyle = sc.muted
-    fit(ctx, s.sub, px => `italic 400 ${px}px ${FONT.serif}`, u(40), W, u(22))
-    y += u(50)
+    fit(ctx, s.sub, px => subFont(px), u(31), W, u(20))
+    y += u(46)
     ctx.fillText(ellipsize(ctx, s.sub, W), m, y)
   }
   y += u(34)
@@ -692,7 +767,7 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
       if (l.kind === 'head') {
         ctx.fillStyle = sc.accent === sc.fg ? sc.fg : sc.accent
         track(ctx, px * 0.16)
-        ctx.font = `500 ${px * 0.86}px ${FONT.mono}`
+        ctx.font = capsFont(px * 0.84)
         ctx.fillText(ellipsize(ctx, l.text, colW), cx, ly)
         track(ctx, 0)
         ctx.globalAlpha = 0.35
@@ -702,13 +777,13 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
       } else {
         ctx.fillStyle = sc.muted
         track(ctx, 0)
-        ctx.font = `500 ${px * 0.8}px ${FONT.mono}`
+        ctx.font = subFont(px * 0.78)
         if (l.n) ctx.fillText(l.n, cx, ly)
         // value
         let vw = 0
         if (l.value) {
           ctx.fillStyle = sc.fg
-          ctx.font = `500 ${px * 0.92}px ${FONT.mono}`
+          ctx.font = subFont(px * 0.92, 600)
           ctx.textAlign = 'right'
           ctx.fillText(l.value, cx + colW, ly)
           ctx.textAlign = 'left'
@@ -717,7 +792,7 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
         // name: same size on every line; a long one is condensed (to 78%), then ellipsized
         ctx.fillStyle = sc.fg
         const nameW = colW - numW - vw
-        ctx.font = `500 ${px}px ${FONT.sans}`
+        ctx.font = subFont(px)
         const w0 = ctx.measureText(l.name).width
         const k = w0 > nameW ? Math.max(0.78, nameW / w0) : 1
         const name = ellipsize(ctx, l.name, nameW / k)
@@ -744,16 +819,16 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
   let fy = size - footH + u(50)
   if (s.notes) {
     ctx.fillStyle = sc.muted
-    track(ctx, u(1.2))
-    ctx.font = `400 ${u(17)}px ${FONT.mono}`
+    track(ctx, u(0.3))
+    ctx.font = subFont(u(18), 400)
     const nl = wrap(ctx, s.notes, W - u(120)).slice(0, 2)
     nl.forEach((l, i) => ctx.fillText(l, m, fy + i * u(24)))
     fy += nl.length * u(24) + u(4)
   }
   ctx.fillStyle = sc.fg
   track(ctx, u(2.6))
-  ctx.font = `500 ${u(15)}px ${FONT.mono}`
-  ctx.fillText(`${BRAND.motto.toUpperCase()}  ·  33⅓ RPM`, m, size - u(34))
+  ctx.font = capsFont(u(15))
+  fillText(ctx, `${mottoCaps()}  ·  33⅓ RPM`, m, size - u(34))
   drawRoundel(ctx, size - m - u(40), size - footH / 2 + u(8), u(38))
   track(ctx, 0)
   ctx.restore()
@@ -815,7 +890,7 @@ export function drawCompanySleeve(ctx: Ctx, x0: number, y0: number, size: number
   ctx.fillStyle = s.inner ? ink : sc.fg
   track(ctx, 0)
   if (s.inner) {
-    ctx.font = `500 ${u(18)}px ${FONT.mono}`
+    ctx.font = capsFont(u(18))
     track(ctx, u(4))
     ctx.fillText('GLORY RECORDS · HOUSE PRESSING', c, u(80))
     ctx.fillText(`${BRAND.street.toUpperCase()} · PHILADELPHIA`, c, size - u(62))
@@ -825,14 +900,22 @@ export function drawCompanySleeve(ctx: Ctx, x0: number, y0: number, size: number
     const gpx = fit(ctx, 'GLORY', px => `400 ${px}px ${FONT.display}`, Math.min(u(150), (top - u(40)) * 0.95), u(600), u(40))
     ctx.fillText('GLORY', c, u(34) + gpx * 0.8)
     track(ctx, u(5))
-    ctx.font = `500 ${u(20)}px ${FONT.mono}`
+    ctx.font = capsFont(u(20))
     ctx.fillText('BEER BAR & KITCHEN', c, Math.min(top, u(34) + gpx * 0.8 + u(34)))
-    track(ctx, 0)
-    fit(ctx, BRAND.motto, px => `italic 400 ${px}px ${FONT.serif}`, u(58), u(600), u(24))
-    ctx.fillText(BRAND.motto, c, Math.max(c + ringR + u(70), size - u(96)))
+    // the motto in a ruled box, as on the painted sign by the front windows
+    const motto = mottoCaps()
+    const my = Math.max(c + ringR + u(66), size - u(116))
+    track(ctx, u(4))
+    fit(ctx, motto, px => capsFont(px, 700), u(27), u(640), u(14))
+    const mw = ctx.measureText(motto).width
+    const bh = u(58)
+    ctx.fillText(motto, c + u(2), my + u(10))
+    ctx.strokeStyle = ctx.fillStyle
+    ctx.lineWidth = u(3)
+    ctx.strokeRect(c - mw / 2 - u(30), my - bh / 2, mw + u(60), bh)
     ctx.fillStyle = ink
     track(ctx, u(3))
-    ctx.font = `500 ${u(20)}px ${FONT.mono}`
+    ctx.font = capsFont(u(19))
     ctx.textAlign = 'left'
     ctx.fillText(s.rpm ?? '45 RPM', u(46), size - u(40))
     ctx.textAlign = 'right'

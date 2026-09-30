@@ -1,0 +1,18 @@
+# The Event Inquiry Form's backend: a Cloudflare Worker that checks the
+# visitor's Turnstile token and sends the inquiry to Dave through SendGrid.
+#
+# Secrets (never in this file or the site): set them once with
+#   npx wrangler secret put SENDGRID_API_KEY
+#   npx wrangler secret put TURNSTILE_SECRET
+name = "glory-event-inquiry"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[vars]
+# where inquiries go, and the verified SendGrid sender they come from
+CONTACT_TO_EMAIL = "dave@gloryphilly.com"
+CONTACT_FROM_EMAIL = "noreply@gloryphilly.com"
+CONTACT_FROM_NAME = "Glory website"
+# sites allowed to post the form (comma separated): the GitHub Pages preview,
+# gloryphilly.com, and the local dev servers
+ALLOWED_ORIGINS = "https://harkdigital.github.io,https://gloryphilly.com,https://www.gloryphilly.com,http://localhost:6980,http://localhost:6990"

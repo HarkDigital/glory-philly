@@ -8,10 +8,15 @@ import type { Frame } from '../core/types'
  *
  *  - BACKDROP (a camera-centred dome): a vertical gradient (top/bottom), a
  *    soft STUDIO POOL of light behind the subject (cyc/cycColor/cycX/cycY: the
- *    product-shot sweep), an out-of-focus BRICK wall (world-anchored courses of
- *    running bond with mortar lines, so it parallaxes), a low band of HAZE,
- *    string BULBS in shallow swags, BOKEH of far lights. Beams exist but are
- *    off by default.
+ *    product-shot sweep), GLORY'S ROOM out of focus (room/walnutColor/
+ *    ceilingColor: the real bar from Mike's photos — a BLACK CEILING with
+ *    silver flex duct, reclaimed-walnut walls with boxy clad columns and a
+ *    warm sconce pool on each), an out-of-focus BRICK accent (world-anchored
+ *    running bond with dark mortar: panels between the columns while `room`
+ *    is up, the whole wall when it's 0), a low band of HAZE, wire-cage EDISON
+ *    PENDANTS hanging from the ceiling (`bulbs`; `strings` 1 brings back the
+ *    old swagged strands), BOKEH of far lights. Beams exist but are off by
+ *    default.
  *  - THE SPOT (the ONLY shadow caster): a key light from above and in front.
  *    Chapters aim it every frame (spotPos → spotAt, cone angle). Give props
  *    castShadow / receiveShadow yourself; keep tiny props from casting.
@@ -19,10 +24,12 @@ import type { Frame } from '../core/types'
  *    rimBDir: x right, y up, z toward the camera — negative z is BEHIND the
  *    subject), colours rimA/rimB. Rims are what make glass and beer glow.
  *  - FILL: a low warm hemisphere.
- *  - STUDIO REFLECTIONS (PMREM, built at construction): two tall softbox
- *    strips, a big overhead softbox, a row of warm bulbs, brick-red bounce —
- *    so stainless taps, glassware and the beer's meniscus get product-shot
- *    highlights. Sweep them with envTurn.
+ *  - ROOM REFLECTIONS (PMREM, built at construction): Glory's room as a
+ *    reflection — Edison pendants hanging from a black ceiling, the tall
+ *    black-framed front windows on Chestnut Street (the long highlights on
+ *    stainless and glass), the glowing back bar (a warm band at bar height),
+ *    walnut walls with sconces, a warm floor — so taps, glassware and the
+ *    beer's meniscus reflect the bar, not a studio. Sweep with envTurn.
  *
  * Keep what the engine calls: `object`, `params`, `resetParams()`,
  * `update(frame, camera)`, `warmEnv()`, `envMap`. Chapters set params every
@@ -38,9 +45,15 @@ export interface WorldParams {
   cycColor: THREE.ColorRepresentation
   cycX: number
   cycY: number
-  /** 0..1 out-of-focus brick wall in the backdrop, its colour (the mortar is lighter) */
+  /** 0..1 out-of-focus brick in the backdrop, its colour (with `room` up: panels between the columns) */
   brick: number
   brickColor: THREE.ColorRepresentation
+  /** 0..1.5 Glory's room in the backdrop: black ceiling + duct, walnut walls, clad columns with sconce pools */
+  room: number
+  /** the walnut's lit colour (keep it dim: it's out of focus behind the subject) */
+  walnutColor: THREE.ColorRepresentation
+  /** the ceiling paint (near black) */
+  ceilingColor: THREE.ColorRepresentation
   /** 0..1.5 backlit smoke behind the subject, its colour and screen height (-1..1) */
   haze: number
   hazeColor: THREE.ColorRepresentation
@@ -50,9 +63,11 @@ export interface WorldParams {
   beamA: THREE.ColorRepresentation
   beamB: THREE.ColorRepresentation
   sway: number
-  /** 0..1.5 string lights (world-anchored strands of warm Edison bulbs) and their colour */
+  /** 0..1.5 Edison bulbs out of focus (world-anchored pendants hanging from the ceiling) and their colour */
   bulbs: number
   bulbColor: THREE.ColorRepresentation
+  /** 0..1 the bulbs as the old swagged strands instead of pendants (0 = pendants, the real room) */
+  strings: number
   /** 0..1.5 out-of-focus far lights (world-anchored) and their gels */
   bokeh: number
   bokehA: THREE.ColorRepresentation
@@ -102,7 +117,7 @@ export const GEL = {
 }
 
 export const WORLD_DEFAULTS = {
-  top: '#140c09',
+  top: '#0c0807',
   bottom: '#050302',
   cyc: 0.5,
   cycColor: '#5a2e1c',
@@ -110,6 +125,9 @@ export const WORLD_DEFAULTS = {
   cycY: 0.05,
   brick: 0.55,
   brickColor: '#3a1a12',
+  room: 0.85,
+  walnutColor: '#4a2a16',
+  ceilingColor: '#060505',
   haze: 0.25,
   hazeColor: '#9a5a2e',
   hazeY: -0.15,
@@ -119,6 +137,7 @@ export const WORLD_DEFAULTS = {
   sway: 0.3,
   bulbs: 0.8,
   bulbColor: GEL.bulb,
+  strings: 0,
   bokeh: 0.2,
   bokehA: GEL.amber,
   bokehB: GEL.candle,
@@ -143,8 +162,8 @@ const VERT = /* glsl */ `
   }
 `
 const FRAG = /* glsl */ `
-  uniform vec3 uCycC, uBrickC;
-  uniform float uCyc, uCycX, uCycY, uBrick;
+  uniform vec3 uCycC, uBrickC, uWalnutC, uCeilC;
+  uniform float uCyc, uCycX, uCycY, uBrick, uRoom, uStrings;
   uniform vec3 uTop, uBottom, uHazeC, uBeamA, uBeamB, uBokehA, uBokehB, uBulbC;
   uniform float uHaze, uHazeY, uBeams, uSway, uBokeh, uBulbs, uTime, uMobile;
   uniform vec2 uRes;
@@ -174,6 +193,72 @@ const FRAG = /* glsl */ `
     vec3 c = mix(uBottom, uTop, smoothstep(-1.1, 1.0, s.y));
     float sm = smoke(s * 0.9 + dir.xz * 0.6);
 
+    // GLORY'S ROOM (out of focus, direction-anchored): a walnut-clad wall on a
+    // cylinder around the camera — boxy columns with wide vertical boards and a
+    // warm sconce pool, horizontal planks between — under a black ceiling with
+    // silver flex duct. Metres on the wall: x along it, y above the eye.
+    float roomBay = 0.0;
+    float roomCol = 0.0;
+    float roomY = 0.0;
+    float roomX = 0.0;
+    if (uRoom > 0.001) {
+      float phi = atan(dir.x, -dir.z);
+      float el = asin(clamp(dir.y, -1.0, 1.0));
+      float R = 8.0;
+      roomX = phi * R;
+      roomY = tan(clamp(el, -1.25, 1.25)) * R;
+      float bayW = 3.4;
+      float bx = mod(roomX + 0.9, bayW) - bayW * 0.5;
+      float bayId = floor((roomX + 0.9) / bayW);
+      roomCol = 1.0 - smoothstep(0.3, 0.4, abs(bx));
+      roomBay = bayId;
+      // planks: 12–18 cm boards, butt joints staggered; soft seams (defocus)
+      float bh = 0.15;
+      float row = floor(roomY / bh);
+      float fy = fract(roomY / bh);
+      float seg = floor(roomX / 1.3 + hash(vec2(row, 7.0)) * 3.0);
+      float tone = hash(vec2(row, seg));
+      float seamY = 1.0 - smoothstep(0.0, 0.34, min(fy, 1.0 - fy));
+      // columns: vertical boards ~20 cm, darker returns at the edges
+      float vb = floor((bx + 0.4) / 0.2);
+      float ctone = hash(vec2(vb, bayId + 3.0));
+      float seamX = 1.0 - smoothstep(0.0, 0.3, min(fract((bx + 0.4) / 0.2), 1.0 - fract((bx + 0.4) / 0.2)));
+      float t = mix(tone, ctone, roomCol);
+      float seam = mix(seamY, seamX, roomCol);
+      vec3 wal = uWalnutC * (0.62 + 0.6 * t) * (1.0 - 0.22 * seam);
+      wal *= mix(1.0, 1.0 - 0.5 * smoothstep(0.24, 0.38, abs(bx)), roomCol);
+      // light: each column's sconce throws a pool; the wall falls off upward
+      vec2 sp = vec2(bx, roomY - 0.55);
+      float pool = exp(-dot(sp, sp * vec2(1.6, 0.7)) * 1.4);
+      float fall = mix(1.0, 0.35, smoothstep(0.2, 2.0, roomY)) * mix(0.55, 1.0, smoothstep(-2.4, -0.6, roomY));
+      wal = wal * fall + uWalnutC * pool * (1.1 + 0.6 * roomCol);
+      // the sconce itself, a small hot core on the column
+      float sd = length(vec2(bx, roomY - 0.62) * vec2(1.0, 0.8));
+      wal += uBulbC * exp(-sd * sd * 90.0) * 0.55;
+      float ceilY = 2.1;
+      float wallM = smoothstep(-3.2, -1.4, roomY) * (1.0 - smoothstep(ceilY - 0.12, ceilY + 0.05, roomY));
+      c = mix(c, wal, wallM * clamp(uRoom, 0.0, 1.0));
+      c += wal * wallM * max(uRoom - 1.0, 0.0);
+      // the ceiling: black paint, silver flex duct crossing it
+      float ceilM = smoothstep(ceilY - 0.1, ceilY + 0.25, roomY);
+      vec3 ceilc = uCeilC;
+      if (dir.y > 0.05) {
+        vec2 cp = dir.xz / dir.y * 2.3;
+        for (int k = 0; k < 2; k++) {
+          float fk = float(k);
+          float zc = (fk < 0.5 ? -2.6 : 3.4) + 0.25 * sin(cp.x * 0.15 + fk);
+          float dz = abs(cp.y - zc);
+          float rad = 0.36;
+          float inD = 1.0 - smoothstep(rad * 0.75, rad * 1.1, dz);
+          float nrm = sqrt(max(0.0, 1.0 - (dz / rad) * (dz / rad)));
+          float ribs = 0.8 + 0.2 * sin(cp.x * 42.0);
+          float lit = (0.35 + 0.65 * nrm) * ribs;
+          ceilc = mix(ceilc, vec3(0.085, 0.082, 0.078) * lit + uWalnutC * 0.12 * nrm, inD * (1.0 - smoothstep(10.0, 22.0, length(cp))));
+        }
+      }
+      c = mix(c, ceilc, ceilM * clamp(uRoom, 0.0, 1.0));
+    }
+
     // BRICK: running bond seen out of focus, world-anchored (azimuth/elevation)
     if (uBrick > 0.001) {
       float phi = atan(dir.x, -dir.z);
@@ -188,10 +273,17 @@ const FRAG = /* glsl */ `
       float mortar = 1.0 - smoothstep(0.0, 0.16, edge);
       float tone = 0.72 + 0.5 * hash(cell + 3.1) + 0.18 * (noise(b * vec2(1.3, 0.7)) - 0.5);
       vec3 bc = uBrickC * tone;
-      bc = mix(bc, uBrickC * 1.9 + vec3(0.03, 0.025, 0.02), mortar * 0.55);
+      bc = mix(bc, mix(uBrickC * 1.9 + vec3(0.03, 0.025, 0.02), uBrickC * 0.45, clamp(uRoom, 0.0, 1.0)), mortar * 0.55);
       // a painted-over, lime-washed patch here and there
       bc = mix(bc, uBrickC * 2.6, smoothstep(0.62, 0.9, noise(vec2(phi * 1.4, el * 2.0) + 4.0)) * 0.35);
-      c = mix(c, bc, uBrick * smoothstep(-0.55, -0.2, el));
+      // with the room up, brick shows as panels between the columns (every other bay, over the counter)
+      float panel = 1.0;
+      if (uRoom > 0.001) {
+        float inBay = (1.0 - roomCol) * step(0.5, mod(roomBay, 2.0));
+        float band = smoothstep(-0.2, 0.1, roomY) * (1.0 - smoothstep(1.7, 1.95, roomY));
+        panel = mix(1.0, inBay * band, clamp(uRoom, 0.0, 1.0));
+      }
+      c = mix(c, bc, uBrick * smoothstep(-0.55, -0.2, el) * panel);
     }
 
     // STUDIO POOL: the product-shot sweep of light on the backdrop
@@ -249,8 +341,42 @@ const FRAG = /* glsl */ `
       }
     }
 
-    // BULBS: strands of warm bulbs in shallow swags, out of focus
-    if (uBulbs > 0.001) {
+    // PENDANTS: wire-cage Edison bulbs hanging from the black ceiling, out of
+    // focus — round bokeh discs with a hot filament core, a faint cage ring,
+    // far ones smaller and dimmer. World-anchored on a grid over the room.
+    if (uBulbs * (1.0 - uStrings) > 0.001 && dir.y > 0.015) {
+      float hb = 1.25;
+      vec2 p = dir.xz / dir.y * hb;
+      vec2 cellSz = vec2(2.7, 3.1);
+      vec2 cell = floor(p / cellSz);
+      vec3 acc = vec3(0.0);
+      for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+          vec2 id = cell + vec2(float(i), float(j));
+          float h = hash(id + 17.0);
+          if (h < 0.28) continue;
+          vec2 o = vec2(hash(id + 1.7), hash(id + 4.3)) - 0.5;
+          vec2 bxz = (id + 0.5 + o * 0.55) * cellSz;
+          float by = hb + (hash(id + 8.1) - 0.5) * 0.5;
+          vec3 B = vec3(bxz.x, by, bxz.y);
+          float dist = length(B);
+          if (dist < 2.2) continue;
+          vec3 nb = B / dist;
+          float rad = clamp(0.2 / dist, 0.006, 0.05);
+          float d = length(dir - nb) / rad;
+          float disc = 1.0 - smoothstep(0.8, 1.0, d);
+          float ring = smoothstep(0.62, 0.8, d) * disc;
+          float core = exp(-d * d * 7.0);
+          float far = 1.0 / (1.0 + dist * 0.07);
+          float flick = 0.95 + 0.05 * sin(uTime * 1.1 + h * 40.0);
+          acc += (disc * 0.32 + ring * 0.12 + core * 1.05) * far * flick;
+        }
+      }
+      c += uBulbC * acc * uBulbs * (1.0 - uStrings) * 0.7 * smoothstep(0.015, 0.08, dir.y);
+    }
+
+    // STRINGS (legacy): strands of warm bulbs in shallow swags, out of focus
+    if (uBulbs * uStrings > 0.001) {
       float phi = atan(dir.x, -dir.z);
       float el = asin(clamp(dir.y, -1.0, 1.0));
       for (int k = 0; k < 3; k++) {
@@ -275,9 +401,9 @@ const FRAG = /* glsl */ `
         float core = exp(-d * d * 5.0);
         float flick = 0.92 + 0.08 * sin(uTime * 1.3 + bi * 2.1 + fk);
         float far = 1.0 - 0.28 * fk;
-        c += uBulbC * (disc * 0.45 + core * 0.9) * uBulbs * flick * far * 0.55;
+        c += uBulbC * (disc * 0.45 + core * 0.9) * uBulbs * uStrings * flick * far * 0.55;
         // the wire, very faint
-        c += uBulbC * 0.02 * uBulbs * (1.0 - smoothstep(0.0, 0.0035, abs(el - yEl))) * far;
+        c += uBulbC * 0.02 * uBulbs * uStrings * (1.0 - smoothstep(0.0, 0.0035, abs(el - yEl))) * far;
       }
     }
 
@@ -302,6 +428,8 @@ export class World {
     bottom: new THREE.Color(),
     cycColor: new THREE.Color(),
     brickColor: new THREE.Color(),
+    walnutColor: new THREE.Color(),
+    ceilingColor: new THREE.Color(),
     hazeColor: new THREE.Color(),
     beamA: new THREE.Color(),
     beamB: new THREE.Color(),
@@ -319,6 +447,10 @@ export class World {
   private uniforms = {
     uCycC: { value: new THREE.Color() },
     uBrickC: { value: new THREE.Color() },
+    uWalnutC: { value: new THREE.Color() },
+    uCeilC: { value: new THREE.Color() },
+    uRoom: { value: 0 },
+    uStrings: { value: 0 },
     uCyc: { value: 0 },
     uCycX: { value: 0 },
     uCycY: { value: 0 },
@@ -381,7 +513,8 @@ export class World {
     this.rimA = new THREE.DirectionalLight(GEL.amber, 0)
     this.rimB = new THREE.DirectionalLight(GEL.red, 0)
     this.object.add(this.rimA, this.rimA.target, this.rimB, this.rimB.target)
-    this.hemi = new THREE.HemisphereLight(0xffd6b0, 0x1a0c08, WORLD_DEFAULTS.fill)
+    // warm bulb light from above, walnut bounce from below
+    this.hemi = new THREE.HemisphereLight(0xffd6b0, 0x2a150b, WORLD_DEFAULTS.fill)
     this.object.add(this.hemi)
 
     this.envMap = renderer ? buildStageEnv(renderer) : new THREE.Texture()
@@ -421,8 +554,8 @@ export class World {
     const p = this.params
     const c = this.cur
     const n = c.n
-    const colors = ['top', 'bottom', 'cycColor', 'brickColor', 'hazeColor', 'beamA', 'beamB', 'bokehA', 'bokehB', 'bulbColor', 'spotColor', 'rimAColor', 'rimBColor'] as const
-    const nums = ['cyc', 'cycX', 'cycY', 'brick', 'haze', 'hazeY', 'beams', 'sway', 'bokeh', 'bulbs', 'spot', 'spotAngle', 'spotPenumbra', 'rimA', 'rimB', 'fill', 'env', 'envTurn'] as const
+    const colors = ['top', 'bottom', 'cycColor', 'brickColor', 'walnutColor', 'ceilingColor', 'hazeColor', 'beamA', 'beamB', 'bokehA', 'bokehB', 'bulbColor', 'spotColor', 'rimAColor', 'rimBColor'] as const
+    const nums = ['cyc', 'cycX', 'cycY', 'brick', 'room', 'strings', 'haze', 'hazeY', 'beams', 'sway', 'bokeh', 'bulbs', 'spot', 'spotAngle', 'spotPenumbra', 'rimA', 'rimB', 'fill', 'env', 'envTurn'] as const
     const k = this.first ? 1 : 1 - Math.exp(-5 * frame.dt)
     for (const key of colors) c[key].lerp(this.tmpC.set(p[key]), k)
     for (const key of nums) n[key] = this.first ? p[key] : n[key] + (p[key] - n[key]) * k
@@ -441,6 +574,12 @@ export class World {
     u.uCycX.value = n.cycX
     u.uCycY.value = n.cycY
     u.uBrick.value = n.brick
+    u.uWalnutC.value.copy(c.walnutColor)
+    u.uCeilC.value.copy(c.ceilingColor)
+    // the room fades out as a chapter goes to the bone cyclorama (bright top/bottom)
+    const lum = Math.max(c.top.r * 0.3 + c.top.g * 0.59 + c.top.b * 0.11, c.bottom.r * 0.3 + c.bottom.g * 0.59 + c.bottom.b * 0.11)
+    u.uRoom.value = n.room * (1 - Math.min(1, Math.max(0, (lum - 0.05) / 0.25)))
+    u.uStrings.value = Math.min(1, Math.max(0, n.strings))
     u.uHazeC.value.copy(c.hazeColor)
     u.uBeamA.value.copy(c.beamA)
     u.uBeamB.value.copy(c.beamB)
@@ -504,56 +643,90 @@ export class World {
 }
 
 /**
- * The studio as a reflection: warm dark, two strands of bulbs across the
- * ceiling (glassware catches them as a row of hot dots), a big overhead
- * softbox and two tall strips (the long product-shot highlights on steel and
- * glass), brick-red bounce, a faint dusk window.
+ * Glory's room as a reflection (Mike's photos): a black ceiling hung with
+ * Edison pendants (glassware catches them as rows of hot dots), the tall
+ * black-framed front windows on Chestnut Street (the long highlights on
+ * stainless and glass: two sashes of panes), the lit back bar (a warm band at
+ * bar height: bottles glowing over the mirror), walnut walls with a sconce on
+ * each column, a warm floor. Energy is kept close to the old studio so every
+ * chapter's glass and steel still read.
  */
 function buildStageEnv(renderer: THREE.WebGLRenderer): THREE.Texture {
   const env = new THREE.Scene()
-  const room = new THREE.Mesh(
-    new THREE.SphereGeometry(40, 32, 16),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color('#0a0605'), side: THREE.BackSide }),
-  )
+  const room = new THREE.Mesh(new THREE.SphereGeometry(40, 48, 24), new THREE.MeshBasicMaterial({ map: roomEnvMap(), side: THREE.BackSide }))
   env.add(room)
   const lamp = (color: string, power: number) => new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(power) })
-  const bulbGeo = new THREE.SphereGeometry(0.32, 12, 8)
+  // pendants: bulbs on cords at a few heights over the room
+  const bulbGeo = new THREE.SphereGeometry(0.3, 12, 8)
   const bulbMat = lamp('#ffb45e', 16)
-  for (const [z, y0, n] of [
-    [9, 12, 11],
-    [-6, 13, 9],
-  ] as [number, number, number][]) {
-    for (let i = 0; i < n; i++) {
-      const u = i / (n - 1) - 0.5
-      const b = new THREE.Mesh(bulbGeo, bulbMat)
-      b.position.set(u * 34, y0 - 2.2 * (0.25 - u * u) * 4 * 0.5, z)
-      env.add(b)
-    }
+  const cordMat = lamp('#050404', 1)
+  const cordGeo = new THREE.CylinderGeometry(0.03, 0.03, 1, 4)
+  let seed = 7
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  for (let i = 0; i < 26; i++) {
+    const a = rnd() * Math.PI * 2
+    const r = 7 + rnd() * 16
+    const y = 9 + rnd() * 5
+    const b = new THREE.Mesh(bulbGeo, bulbMat)
+    b.position.set(Math.cos(a) * r, y, Math.sin(a) * r)
+    env.add(b)
+    const cord = new THREE.Mesh(cordGeo, cordMat)
+    cord.scale.y = 17 - y
+    cord.position.set(b.position.x, y + (17 - y) / 2, b.position.z)
+    env.add(cord)
   }
-  // Resonance's product studio: a big overhead softbox and two tall strips
-  const soft = new THREE.Mesh(new THREE.PlaneGeometry(14, 10), lamp('#fff1de', 2.2))
-  soft.position.set(2, 22, 6)
-  soft.lookAt(0, 0, 0)
-  env.add(soft)
+  // sconces on the walnut walls (eye height)
+  const sconceMat = lamp('#ffb060', 12)
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.3
+    const b = new THREE.Mesh(bulbGeo, sconceMat)
+    b.position.set(Math.cos(a) * 30, 3.5, Math.sin(a) * 30)
+    env.add(b)
+  }
+  // the front windows: two tall sashes of panes, black mullions (the long highlights)
+  const winMat = lamp('#fff3e4', 1)
   for (const [x, z, pw] of [
-    [-16, 10, 3.2],
-    [17, 4, 2.4],
+    [-16, 10, 3.0],
+    [17, 4, 2.2],
   ] as [number, number, number][]) {
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 22), lamp('#fff6ea', pw))
-    strip.position.set(x, 3, z)
-    strip.lookAt(0, 3, 0)
-    env.add(strip)
+    const sash = new THREE.Group()
+    const mat = winMat.clone()
+    mat.color.multiplyScalar(pw)
+    for (let cx = 0; cx < 2; cx++)
+      for (let cy = 0; cy < 5; cy++) {
+        const pane = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 3.9), mat)
+        pane.position.set((cx - 0.5) * 1.1, (cy - 2) * 4.3, 0)
+        sash.add(pane)
+      }
+    sash.position.set(x, 3, z)
+    sash.lookAt(0, 3, 0)
+    env.add(sash)
   }
+  // the back bar, lit: a long warm band at bar height (bottles over the mirror), a cooler's cool strip under it
+  const backbar = new THREE.Mesh(new THREE.PlaneGeometry(34, 3.2), lamp('#ffb070', 1.35))
+  backbar.position.set(0, 1.2, -24)
+  backbar.lookAt(0, 1.2, 0)
+  env.add(backbar)
+  const coolers = new THREE.Mesh(new THREE.PlaneGeometry(26, 1.2), lamp('#cfe6ff', 0.5))
+  coolers.position.set(0, -2.4, -23.5)
+  coolers.lookAt(0, -2.4, 0)
+  env.add(coolers)
+  // walnut bounce (was brick-red) + a faint dusk through the far glass
   const wash = (color: string, power: number, x: number, z: number) => {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(16, 22), lamp(color, power))
     m.position.set(x, 2, z)
     m.lookAt(0, 2, 0)
     env.add(m)
   }
-  wash('#7a3524', 0.4, -30, 4)
-  wash('#5a2616', 0.3, 30, 0)
-  wash('#40567e', 0.1, 0, -32)
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), lamp('#2a160a', 1))
+  wash('#7a4a2a', 0.42, -30, 4)
+  wash('#6a3c22', 0.32, 30, 0)
+  wash('#40567e', 0.1, 0, 32)
+  // a soft warm overhead glow (the bulbs' light on the black ceiling; much dimmer than the old softbox)
+  const soft = new THREE.Mesh(new THREE.PlaneGeometry(14, 10), lamp('#ffe2c0', 0.9))
+  soft.position.set(2, 22, 6)
+  soft.lookAt(0, 0, 0)
+  env.add(soft)
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), lamp('#2e1a0c', 1))
   floor.rotation.x = -Math.PI / 2
   floor.position.y = -8
   env.add(floor)
@@ -561,12 +734,74 @@ function buildStageEnv(renderer: THREE.WebGLRenderer): THREE.Texture {
   const pmrem = new THREE.PMREMGenerator(renderer)
   const rt = pmrem.fromScene(env, 0.02)
   pmrem.dispose()
+  const mats = new Set<THREE.Material>()
+  const geos = new Set<THREE.BufferGeometry>()
   env.traverse(o => {
     const m = o as THREE.Mesh
     if (m.isMesh) {
-      m.geometry.dispose()
-      ;(m.material as THREE.Material).dispose()
+      geos.add(m.geometry)
+      mats.add(m.material as THREE.Material)
     }
   })
+  for (const g of geos) g.dispose()
+  for (const m of mats) {
+    ;(m as THREE.MeshBasicMaterial).map?.dispose()
+    m.dispose()
+  }
   return rt.texture
+}
+
+/**
+ * The room band for the reflection sphere (equirect on the sphere's UVs):
+ * black ceiling with a silver duct, walnut walls (planks, clad columns) around
+ * the horizon, a dark warm floor. LDR: it's the bounce, the lamps are meshes.
+ */
+function roomEnvMap(): THREE.Texture {
+  const W = 512
+  const H = 256
+  const cv = document.createElement('canvas')
+  cv.width = W
+  cv.height = H
+  const g = cv.getContext('2d')!
+  let seed = 3
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
+  // v = 1 at the top (canvas row 0)
+  g.fillStyle = '#070605'
+  g.fillRect(0, 0, W, H)
+  // two ducts across the ceiling
+  for (const y of [H * 0.12, H * 0.24]) {
+    const gr = g.createLinearGradient(0, y - 7, 0, y + 7)
+    gr.addColorStop(0, 'rgba(60,58,55,0)')
+    gr.addColorStop(0.5, 'rgba(92,90,86,1)')
+    gr.addColorStop(1, 'rgba(60,58,55,0)')
+    g.fillStyle = gr
+    g.fillRect(0, y - 7, W, 14)
+  }
+  // walnut band: planks + columns
+  const y0 = Math.round(H * 0.36)
+  const y1 = Math.round(H * 0.62)
+  for (let y = y0; y < y1; y += 4) {
+    let x = -rnd() * 60
+    while (x < W) {
+      const len = 30 + rnd() * 70
+      const t = 0.6 + rnd() * 0.6
+      g.fillStyle = `rgb(${Math.round(64 * t)},${Math.round(38 * t)},${Math.round(22 * t)})`
+      g.fillRect(x, y, len, 3.4)
+      x += len + 0.6
+    }
+  }
+  for (let x = 20; x < W; x += 64) {
+    g.fillStyle = 'rgba(96,60,34,0.8)'
+    g.fillRect(x, y0, 9, y1 - y0)
+    g.fillStyle = 'rgba(20,12,7,0.8)'
+    g.fillRect(x + 9, y0, 2, y1 - y0)
+  }
+  const fl = g.createLinearGradient(0, y1, 0, H)
+  fl.addColorStop(0, '#20140b')
+  fl.addColorStop(1, '#120b06')
+  g.fillStyle = fl
+  g.fillRect(0, y1, W, H - y1)
+  const t = new THREE.CanvasTexture(cv)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
 }

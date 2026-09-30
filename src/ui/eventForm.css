@@ -1,0 +1,1039 @@
+/* ------------------------------------------------------------------
+   THE EVENT INQUIRY FORM (src/ui/eventForm.ts): the Back Room's printed
+   inquiry card, made real — cream card stock with a printer's hairline
+   frame, ink type, numbered ruled fill-in fields, the red G stamp and a
+   Glory red pill. Alfa Slab One for the title, Inter Tight for everything
+   else (tracked caps for labels). No monospace, no italic serif.
+
+   .gef          the card (static: pages, the no-WebGL fallback)
+   .gef--dark    a stout panel instead of the cream card
+   .gef--compact tighter, no brand line
+   .gef-dock     the mount in the events chapter's accessible section, fixed
+                 over the scene; --gef-s (0..1) is written by dock.set(v)
+
+   Contrast (measured on the card's darkest stock #ede2cc): ink 15:1,
+   muted ink 8.5:1, red numbers / errors #a51a20 5.9:1, field rules 5:1,
+   the pill's cream on Glory red 4.75:1. Every selector is scoped here.
+   ------------------------------------------------------------------ */
+
+.gef {
+  --gef-paper: #f3ead8;
+  --gef-ink: #140c08;
+  --gef-ink-2: #2a1a12;
+  --gef-muted: rgba(20, 12, 8, 0.78);
+  --gef-rule: rgba(20, 12, 8, 0.62);
+  --gef-hair: rgba(20, 12, 8, 0.2);
+  --gef-frame: rgba(20, 12, 8, 0.22);
+  --gef-field: rgba(255, 252, 244, 0.72);
+  --gef-field-on: #fffdf8;
+  --gef-num: #a51a20;
+  --gef-err: #a51a20;
+  --gef-err-bg: rgba(216, 39, 46, 0.08);
+  --gef-ring: #140c08;
+  --gef-halo: rgba(240, 165, 58, 0.95);
+  --gef-dash: rgba(20, 12, 8, 0.35);
+  --gef-pad: 30px;
+  position: relative;
+  width: 100%;
+  color: var(--gef-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  max-width: 640px;
+  color-scheme: light;
+  -webkit-text-size-adjust: 100%;
+}
+/* in page copy (the no-WebGL fallback): no inherited paragraph measure, a little air above */
+.gef.gef p:not(.gef-done-b) {
+  max-width: none;
+}
+[data-event-form]:not(.gef-dock) {
+  margin: 28px 0 8px;
+}
+
+/* ---- the card stock ---- */
+.gef .gef-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: var(--gef-paper);
+  background-image:
+    radial-gradient(120% 90% at 28% 0%, rgba(255, 250, 240, 0.85), rgba(255, 250, 240, 0) 62%),
+    var(--tx-paper, none),
+    linear-gradient(180deg, #f5eddc, #ede2cc);
+  background-size:
+    auto,
+    160px 160px,
+    auto;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 2px 3px rgba(0, 0, 0, 0.35),
+    0 30px 70px rgba(0, 0, 0, 0.6);
+}
+/* a hairline printer's frame, inset in the stock */
+.gef .gef-card::after {
+  content: '';
+  position: absolute;
+  inset: 9px;
+  border: 1px solid var(--gef-frame);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.gef .gef-body {
+  position: relative;
+  min-height: 0;
+  padding: calc(var(--gef-pad) - 2px) var(--gef-pad) calc(var(--gef-pad) - 6px);
+  overflow: auto;
+  /* at the end of its own scroll the page (the story) takes over: never a trap */
+  overscroll-behavior: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(20, 12, 8, 0.35) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---- head: brand, title, the stamp ---- */
+.gef .gef-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.gef .gef-brand {
+  margin: 0 0 8px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gef-muted);
+}
+.gef .gef-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-style: normal;
+  font-size: clamp(1.75rem, 2.5vw, 2.35rem);
+  line-height: 1;
+  letter-spacing: -0.005em;
+  color: var(--gef-ink);
+}
+.gef .gef-req {
+  margin: 9px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--gef-muted);
+}
+.gef .gef-stamp {
+  flex: none;
+  width: 58px;
+  height: 58px;
+  margin: -6px -4px 0 0;
+  transform: rotate(9deg);
+  opacity: 0.94;
+}
+
+/* ---- the fields: numbered, ruled, like the printed card ---- */
+.gef .gef-form {
+  margin: 0;
+}
+.gef .gef-form[hidden] {
+  display: none;
+}
+.gef .gef-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  margin-top: 20px;
+}
+.gef .gef-f-name,
+.gef .gef-f-email,
+.gef .gef-f-summary {
+  grid-column: 1 / -1;
+}
+.gef .gef-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+}
+.gef .gef-label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 620;
+  line-height: 1.3;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gef-ink-2);
+  cursor: pointer;
+}
+.gef .gef-n {
+  flex: none;
+  min-width: 1.7em;
+  color: var(--gef-num);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.gef .gef-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  margin: 0;
+  padding: 11px 12px 9px;
+  font-family: var(--font-sans);
+  /* 16px: iOS never zooms into a field this size */
+  font-size: 16px;
+  font-weight: 450;
+  line-height: 1.35;
+  color: var(--gef-ink);
+  background: var(--gef-field);
+  border: 1px solid var(--gef-hair);
+  border-bottom: 2px solid var(--gef-rule);
+  border-radius: 3px 3px 0 0;
+  box-shadow: inset 0 1px 2px rgba(20, 12, 8, 0.07);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+}
+.gef .gef-input:hover {
+  border-bottom-color: var(--gef-ink);
+}
+.gef .gef-input:focus {
+  background: var(--gef-field-on);
+  border-color: rgba(20, 12, 8, 0.4);
+  border-bottom-color: var(--glory, #d8272e);
+}
+/* the ring: ink on the stock (15:1), an amber glint outside it */
+.gef .gef-input:focus-visible {
+  outline: 2px solid var(--gef-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--gef-halo);
+}
+.gef .gef-input[aria-invalid='true'] {
+  background: var(--gef-err-bg);
+  border-bottom-color: var(--gef-err);
+}
+.gef .gef-text {
+  height: 94px;
+  min-height: 56px;
+  resize: vertical;
+  line-height: 1.45;
+}
+.gef .gef-date {
+  min-height: 46px;
+  cursor: pointer;
+}
+.gef .gef-date::-webkit-date-and-time-value {
+  min-height: 1.35em;
+  text-align: left;
+}
+/* an empty date shows its format hint (mm/dd/yyyy) in the muted ink, like a placeholder */
+.gef .gef-date.is-empty::-webkit-datetime-edit {
+  color: var(--gef-hint, rgba(20, 12, 8, 0.6));
+}
+.gef .gef-date::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+}
+.gef .gef-date::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+/* an inline error: a small red disc, then the message */
+.gef .gef-err {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 1.35;
+  color: var(--gef-err);
+}
+.gef .gef-err::before {
+  content: '';
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  border-radius: 50%;
+  background:
+    linear-gradient(#fffaf0, #fffaf0) 50% 3px / 2px 6px no-repeat,
+    linear-gradient(#fffaf0, #fffaf0) 50% 10px / 2px 2px no-repeat,
+    var(--gef-err);
+}
+.gef .gef-err[hidden] {
+  display: none;
+}
+
+/* the honeypot: off-screen, never focusable, never read */
+.gef .gef-hp {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+/* Turnstile runs invisibly (interaction-only) and takes no room unless it must ask */
+.gef .gef-turnstile {
+  margin: 0;
+}
+.gef .gef-turnstile[hidden],
+.gef .gef-turnstile:empty {
+  display: none;
+}
+
+/* the error summary (role=alert): always rendered (a live region must exist
+   before its text arrives), flat when empty */
+.gef .gef-summary {
+  margin-top: 16px;
+  padding: 10px 12px 10px 13px;
+  border-left: 3px solid var(--gef-err);
+  background: var(--gef-err-bg);
+  border-radius: 0 3px 3px 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--gef-ink);
+}
+.gef .gef-summary:empty {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.gef .gef-summary-t {
+  margin: 0;
+}
+
+/* ---- links (the summary's field links, Dave's address) ---- */
+.gef .gef-link {
+  color: var(--gef-ink);
+  font-weight: 620;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(165, 26, 32, 0.75);
+  text-underline-offset: 3px;
+  border-radius: 2px;
+  overflow-wrap: anywhere;
+}
+.gef .gef-link:hover {
+  color: var(--gef-err);
+  text-decoration-color: currentColor;
+}
+.gef .gef-link:focus-visible {
+  outline: 2px solid var(--gef-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--gef-halo);
+}
+
+/* ---- the send row ---- */
+.gef .gef-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-top: 20px;
+}
+.gef .gef-submit {
+  position: relative;
+  flex: none;
+  justify-content: center;
+  min-height: 48px;
+  padding: 14px 24px;
+  font-size: 12.5px;
+}
+.gef .gef-submit[aria-disabled='true'] {
+  cursor: progress;
+  transform: none;
+  background: var(--glory-deep, #a51a20);
+}
+/* the pill's ring on the stock: ink, then amber (the base white ring vanishes on cream) */
+.gef .gef-submit:focus-visible,
+.gef .gef-ghost:focus-visible {
+  outline: 2px solid var(--gef-ring);
+  outline-offset: 3px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 0 0 6px var(--gef-halo);
+}
+.gef .gef-arrow {
+  transition: transform 0.2s ease;
+}
+.gef .gef-submit:hover .gef-arrow,
+.gef .gef-submit:focus-visible .gef-arrow {
+  transform: translateX(3px);
+}
+/* sending: a little record spins where the arrow was */
+.gef .gef-spin {
+  display: none;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #fffaf0 0 9%, #d8272e 10% 30%, rgba(0, 0, 0, 0) 31%),
+    repeating-radial-gradient(circle, #1a1210 0 1px, #2a201c 1.5px 2px),
+    #140c08;
+  box-shadow: 0 0 0 1px rgba(255, 250, 240, 0.35);
+}
+.gef.is-busy .gef-spin {
+  display: inline-block;
+  animation: gef-spin 1.8s linear infinite;
+}
+.gef.is-busy .gef-arrow {
+  display: none;
+}
+@keyframes gef-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.gef .gef-via {
+  flex: 1 1 200px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--gef-muted);
+}
+
+/* the ghost buttons on the stock (copy, edit, send another) */
+.gef .gef-ghost {
+  min-height: 46px;
+  padding: 13px 20px;
+  font-size: 12px;
+  color: var(--gef-ink);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px rgba(20, 12, 8, 0.7);
+}
+.gef .gef-ghost:hover {
+  transform: translateY(-2px);
+  background: rgba(20, 12, 8, 0.06);
+  box-shadow: inset 0 0 0 1.5px var(--gef-ink);
+}
+.gef .gef-ghost[hidden] {
+  display: none;
+}
+
+/* ---- parties of more than 10 ---- */
+.gef .gef-large {
+  margin: 20px 0 0;
+  padding-top: 14px;
+  border-top: 1px dashed var(--gef-dash);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--gef-muted);
+}
+
+/* ---- sent / handed to the email app ---- */
+.gef .gef-done {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 8px 0 4px;
+}
+.gef .gef-done[hidden] {
+  display: none;
+}
+/* done: the G stamp comes down on the card once more */
+.gef.is-done .gef-stamp {
+  animation: gef-stamp 0.5s cubic-bezier(0.2, 0.8, 0.25, 1.2) both;
+}
+@keyframes gef-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(1.5) rotate(-6deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.94) rotate(11deg);
+  }
+  100% {
+    opacity: 0.94;
+    transform: scale(1) rotate(9deg);
+  }
+}
+.gef .gef-done-t {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.6rem, 2.3vw, 2.15rem);
+  line-height: 1.02;
+  color: var(--gef-ink);
+  border-radius: 2px;
+}
+/* the result's title takes focus only so the reader starts there (it isn't a
+   control, never in the Tab order): no ring */
+.gef .gef-done-t:focus,
+.gef .gef-done-t:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.gef .gef-done-b {
+  margin: 0;
+  max-width: 38ch;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--gef-ink-2);
+}
+/* the inquiry as sent: ruled lines like the printed card */
+.gef .gef-recap {
+  align-self: stretch;
+  display: grid;
+  margin: 4px 0 2px;
+  padding: 0;
+}
+.gef .gef-recap[hidden] {
+  display: none;
+}
+.gef .gef-recap-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 0 6px;
+  border-bottom: 1px solid var(--gef-hair);
+}
+.gef .gef-recap dt {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 10.5px;
+  font-weight: 620;
+  line-height: 1.3;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gef-ink-2);
+}
+.gef .gef-recap dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--gef-ink);
+  overflow-wrap: anywhere;
+}
+.gef .gef-recap .is-summary dd {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.gef .gef-mailed[hidden] {
+  display: none;
+}
+.gef .gef-mailed-q {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--gef-muted);
+}
+.gef .gef-copy-status {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gef-ink);
+}
+.gef .gef-copy-status:empty {
+  margin: 0;
+}
+.gef .gef-done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* ---- the copy layer's focus-pill rule (.sr-copy :is(a, button):focus) must
+   never reach the form (only matters if the form is left inside .sr-copy) ---- */
+.gef.gef :is(a, button):focus {
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none;
+  z-index: auto;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  white-space: normal;
+}
+
+/* ================= tones and density ================= */
+
+.gef--dark {
+  --gef-ink: #f3ead8;
+  --gef-ink-2: rgba(243, 234, 216, 0.92);
+  --gef-muted: rgba(243, 234, 216, 0.8);
+  --gef-rule: rgba(243, 234, 216, 0.6);
+  --gef-hair: rgba(243, 234, 216, 0.2);
+  --gef-frame: rgba(243, 234, 216, 0.16);
+  --gef-field: rgba(243, 234, 216, 0.06);
+  --gef-field-on: rgba(243, 234, 216, 0.1);
+  --gef-num: #ffc978;
+  --gef-err: #ff7a7e;
+  --gef-err-bg: rgba(255, 90, 95, 0.1);
+  --gef-ring: #fffaf0;
+  --gef-halo: rgba(0, 0, 0, 0.9);
+  --gef-dash: rgba(243, 234, 216, 0.3);
+  --gef-hint: rgba(243, 234, 216, 0.6);
+  color-scheme: dark;
+}
+.gef--dark .gef-card {
+  background: rgba(18, 11, 8, 0.96);
+  box-shadow:
+    inset 0 0 0 1px rgba(243, 234, 216, 0.12),
+    0 30px 80px rgba(0, 0, 0, 0.6);
+}
+.gef--dark .gef-input:focus {
+  border-bottom-color: var(--glory-lit, #ff5a5f);
+}
+.gef--dark .gef-err::before {
+  background:
+    linear-gradient(#140c08, #140c08) 50% 3px / 2px 6px no-repeat,
+    linear-gradient(#140c08, #140c08) 50% 10px / 2px 2px no-repeat,
+    var(--gef-err);
+}
+.gef--dark .gef-link {
+  text-decoration-color: rgba(255, 201, 120, 0.8);
+}
+.gef--dark .gef-ghost {
+  box-shadow: inset 0 0 0 1.5px rgba(243, 234, 216, 0.6);
+}
+.gef--dark .gef-ghost:hover {
+  background: rgba(243, 234, 216, 0.08);
+}
+.gef--dark .gef-body {
+  scrollbar-color: rgba(243, 234, 216, 0.35) transparent;
+}
+
+.gef--compact {
+  --gef-pad: 20px;
+}
+.gef--compact .gef-brand {
+  display: none;
+}
+.gef--compact .gef-title {
+  font-size: 1.6rem;
+}
+.gef--compact .gef-stamp {
+  width: 44px;
+  height: 44px;
+}
+.gef--compact .gef-grid {
+  gap: 10px 12px;
+  margin-top: 14px;
+}
+.gef--compact .gef-text {
+  height: 70px;
+}
+.gef--compact .gef-actions {
+  margin-top: 14px;
+}
+.gef--compact .gef-large {
+  margin-top: 14px;
+  padding-top: 10px;
+  font-size: 12.5px;
+}
+
+/* ================= viewports ================= */
+
+/* room for name | email side by side */
+@media (min-width: 560px) {
+  .gef .gef-f-name,
+  .gef .gef-f-email {
+    grid-column: auto;
+  }
+}
+
+/* phones */
+@media (max-width: 559px) {
+  .gef {
+    --gef-pad: 20px;
+  }
+  .gef .gef-title {
+    font-size: 1.75rem;
+  }
+  .gef .gef-stamp {
+    width: 46px;
+    height: 46px;
+  }
+  .gef .gef-grid {
+    gap: 12px 12px;
+    margin-top: 16px;
+  }
+  .gef .gef-text {
+    height: 80px;
+  }
+  .gef .gef-actions {
+    margin-top: 16px;
+  }
+  .gef .gef-submit {
+    flex: 1 1 100%;
+  }
+  .gef .gef-via {
+    flex-basis: 100%;
+    font-size: 12.5px;
+  }
+  .gef .gef-large {
+    margin-top: 16px;
+    padding-top: 12px;
+    font-size: 13px;
+  }
+}
+
+/* short screens: the whole card still fits between the chrome bands */
+@media (max-height: 800px) and (min-width: 560px) {
+  .gef {
+    --gef-pad: 24px;
+  }
+  .gef .gef-brand {
+    margin-bottom: 6px;
+  }
+  .gef .gef-title {
+    font-size: clamp(1.6rem, 2.3vw, 2rem);
+  }
+  .gef .gef-req {
+    margin-top: 6px;
+  }
+  .gef .gef-stamp {
+    width: 50px;
+    height: 50px;
+  }
+  .gef .gef-grid {
+    gap: 12px 14px;
+    margin-top: 16px;
+  }
+  .gef .gef-field {
+    gap: 5px;
+  }
+  .gef .gef-input {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 8px;
+  }
+  .gef .gef-text {
+    height: 72px;
+  }
+  .gef .gef-actions {
+    margin-top: 16px;
+  }
+  .gef .gef-large {
+    margin-top: 16px;
+    padding-top: 11px;
+    font-size: 13px;
+  }
+}
+/* small phones (375 x 667): everything still fits between the chrome bands */
+@media (max-width: 559px) and (max-height: 720px) {
+  .gef {
+    --gef-pad: 16px;
+  }
+  .gef .gef-body {
+    padding-top: 15px;
+    padding-bottom: 12px;
+  }
+  .gef .gef-brand {
+    display: none;
+  }
+  .gef .gef-title {
+    font-size: 1.45rem;
+  }
+  .gef .gef-req {
+    margin-top: 3px;
+    font-size: 12.5px;
+  }
+  .gef .gef-stamp {
+    width: 38px;
+    height: 38px;
+    margin: -3px -2px 0 0;
+  }
+  .gef .gef-grid {
+    gap: 7px 10px;
+    margin-top: 10px;
+  }
+  .gef .gef-field {
+    gap: 3px;
+  }
+  .gef .gef-label {
+    font-size: 11px;
+    line-height: 1.15;
+  }
+  .gef .gef-input {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 8px;
+  }
+  .gef .gef-text {
+    height: 54px;
+  }
+  .gef .gef-actions {
+    gap: 5px;
+    margin-top: 10px;
+  }
+  .gef .gef-submit {
+    min-height: 46px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .gef .gef-via,
+  .gef .gef-large {
+    font-size: 12px;
+    line-height: 1.32;
+  }
+  .gef .gef-large {
+    margin-top: 7px;
+    padding-top: 6px;
+  }
+  /* the result without its recap: no room for it here */
+  .gef .gef-recap {
+    display: none;
+  }
+  .gef .gef-done {
+    gap: 9px;
+    margin-top: 10px;
+  }
+  .gef .gef-done-t {
+    font-size: 1.5rem;
+  }
+  .gef .gef-done-b {
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+  .gef .gef-ghost {
+    padding: 12px 14px;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+}
+
+/* short landscape (phones sideways, 200% zoom): the card in two columns —
+   the title, the send row and the note left; the fields right */
+@media (orientation: landscape) and (max-height: 500px) {
+  .gef {
+    --gef-pad: 18px;
+  }
+  .gef .gef-body {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    grid-template-rows: auto 1fr auto auto;
+    column-gap: 22px;
+    align-items: start;
+  }
+  .gef .gef-head {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .gef .gef-brand {
+    display: none;
+  }
+  .gef .gef-title {
+    font-size: 1.5rem;
+  }
+  .gef .gef-req {
+    margin-top: 5px;
+    font-size: 12.5px;
+  }
+  .gef .gef-stamp {
+    width: 38px;
+    height: 38px;
+    margin: -4px 0 0;
+  }
+  /* the form spans both columns: its fields on the right, its send row on the left */
+  .gef .gef-form,
+  .gef .gef-done {
+    display: contents;
+  }
+  .gef .gef-form[hidden],
+  .gef .gef-done[hidden] {
+    display: none;
+  }
+  .gef .gef-grid {
+    grid-column: 2;
+    grid-row: 1 / span 4;
+    gap: 8px 12px;
+    margin-top: 0;
+  }
+  .gef .gef-f-name,
+  .gef .gef-f-email {
+    grid-column: auto;
+  }
+  .gef .gef-field {
+    gap: 4px;
+  }
+  .gef .gef-label {
+    font-size: 10.5px;
+  }
+  .gef .gef-input {
+    min-height: 40px;
+    padding: 8px 10px 6px;
+  }
+  .gef .gef-text {
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 58px;
+  }
+  .gef .gef-turnstile,
+  .gef .gef-summary,
+  .gef .gef-actions {
+    grid-column: 1;
+  }
+  .gef .gef-summary {
+    grid-row: 2;
+    align-self: start;
+    margin-top: 10px;
+    font-size: 12.5px;
+  }
+  .gef .gef-actions {
+    grid-row: 3;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .gef .gef-submit {
+    flex: 1 1 100%;
+    min-height: 44px;
+    padding: 11px 16px;
+    font-size: 11.5px;
+  }
+  .gef .gef-via {
+    flex-basis: 100%;
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+  .gef .gef-large {
+    grid-column: 1;
+    grid-row: 4;
+    margin-top: 10px;
+    padding-top: 8px;
+    font-size: 11.5px;
+    line-height: 1.35;
+  }
+  /* the result takes the right column's place (no recap: no room) */
+  .gef .gef-recap {
+    display: none;
+  }
+  .gef .gef-done-t,
+  .gef .gef-done-b,
+  .gef .gef-mailed,
+  .gef .gef-done-actions {
+    grid-column: 2;
+  }
+  .gef .gef-done-t {
+    grid-row: 1;
+    margin: 0;
+    font-size: 1.45rem;
+  }
+  .gef .gef-done-b {
+    grid-row: 2;
+    align-self: start;
+    margin-top: 8px;
+    font-size: 14px;
+  }
+  .gef .gef-mailed {
+    grid-row: 3;
+    margin-top: 6px;
+  }
+  .gef .gef-done-actions {
+    grid-row: 4;
+    margin-top: 8px;
+  }
+}
+
+/* ================= the dock: the real form over the scene ================= */
+
+.gef-dock {
+  /* --gef-s (0..1) comes from dock.set(v); focus inside always shows it */
+  --gef-v: var(--gef-s, 0);
+  position: fixed;
+  z-index: 2;
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  right: calc(var(--gutter) + 2vw);
+  width: min(500px, 42vw);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  pointer-events: none;
+  white-space: normal;
+  opacity: var(--gef-v);
+  transform: translate3d(0, calc((1 - var(--gef-v)) * 18px), 0) rotate(calc((1 - var(--gef-v)) * -1.2deg));
+  transform-origin: 70% 60%;
+  transition:
+    opacity 0.18s ease,
+    transform 0.28s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.gef-dock:focus-within {
+  --gef-v: 1;
+}
+.gef-dock > .gef {
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  min-height: 0;
+}
+.gef-dock.is-shown > .gef,
+.gef-dock:focus-within > .gef {
+  pointer-events: auto;
+}
+.gef-dock .gef-card {
+  flex: 0 1 auto;
+}
+
+/* stacked: phones and tablets upright */
+@media (max-width: 759px), (max-aspect-ratio: 1/1) {
+  .gef-dock {
+    left: var(--gutter);
+    right: var(--gutter);
+    width: auto;
+    align-items: center;
+  }
+  .gef-dock > .gef {
+    width: 100%;
+    max-width: 540px;
+  }
+}
+/* short landscape: wide, right-aligned */
+@media (orientation: landscape) and (max-height: 500px) {
+  .gef-dock {
+    left: auto;
+    right: var(--gutter);
+    width: min(780px, calc(100vw - 2 * var(--gutter)));
+    align-items: stretch;
+  }
+  .gef-dock > .gef {
+    max-width: none;
+  }
+}
+
+/* no drift or settle when motion is reduced: the form fades only */
+@media (prefers-reduced-motion: reduce) {
+  .gef-dock {
+    transform: none;
+    transition: opacity 0.12s linear;
+  }
+  .gef.is-done .gef-stamp,
+  .gef.is-busy .gef-spin {
+    animation: none;
+  }
+}
+html.motion-off .gef-dock {
+  transform: none;
+}
+html.motion-off .gef.is-done .gef-stamp,
+html.motion-off .gef.is-busy .gef-spin {
+  animation: none;
+}

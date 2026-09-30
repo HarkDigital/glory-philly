@@ -65,9 +65,11 @@ import {
  * with grain / ring wear / scuffs, lathed records whose groove highlights hold
  * still while the label turns, a black anodized browser bin with diamond-cut
  * chamfers) and printed in Glory's house style: "Glory Records" GLY-001…
- * (decorative, not claims), the red-ring G roundel, Alfa Slab One titles,
- * Instrument Serif italic subs, Inter Tight numbers. See it all in the lab:
- * ?lab=vinyl&view=all|tt|arm|rim|bin|crate|back|single[&mood=cyc]
+ * (decorative, not claims), the site's red-ring G roundel, Alfa Slab One for
+ * titles and Inter Tight (400–700) for everything else — subs in sentence
+ * case, labels / numbers / prices in tracked caps. No italic serif and no
+ * Plex Mono on any canvas (Mike's rules). See it all in the lab:
+ * ?lab=vinyl&view=all|tt|arm|rim|bin|crate|back|single|lean|corner&c=0..3|ledge[&mood=cyc]
  *
  * UNITS: a 12" sleeve is 1 × 1 (1 unit ≈ 12.4"); a 7" is SEVEN (0.586). The
  * turntable, crate and sleeves share this scale. Scale your group to taste.
@@ -108,6 +110,12 @@ import {
  *    rig.k / .s / .lift / .out / .recordShown / .front() / .flipOf(i) /
  *    .heldWorld(v) / .recordWorld(v) for your HUD and callouts.
  *    fillers: { count, atlas: coverAtlas([...]) } — ONE InstancedMesh.
+ *    CLIP-FREE in every phase (audited: walls, floor, neighbours, the record):
+ *    the flipped pile is contact-solved (each sleeve rests on the rim or the
+ *    one in front, a board's thickness apart), wobbles push instead of passing
+ *    through, the held sleeve stays inside the walls until it clears the rim,
+ *    lifts only once the one in front is down, and the record only slides out
+ *    of a sleeve that's all the way up.
  *
  *  makeTurntable({ finish: 'walnut'|'black', dustCover?, shadows?, contact? }) → Turntable
  *    .setRecord(rec) · .setSpeed(rpm) (33.333 / 45 / 0, damped spin-up/brake)
@@ -116,6 +124,29 @@ import {
  *    .update(frame) every frame (Motion off holds the platter)
  *    .stylus / .mount / .arm / .platter for cameras and callouts; TT = dims.
  *    The platter's strobe dots read "locked" at 33⅓ (and the 45 row at 45).
+ *
+ * ─── placing sleeves so they NEVER clip (place.ts) ─────────────────────────
+ *
+ *  Poses are computed from the object's real bounds (thickness and anything
+ *  parented to it), in its PARENT space; put it in its parent and scale it
+ *  first. Clearance is in kit units (12" sleeve = 1; default 0.012 ≈ 4 mm).
+ *
+ *  leanAgainst(sleeve, { wallZ | plane, floorY?, x? | at?, lean?, yaw?, roll?, clearance? }) → LeanPose
+ *    foot on the floor, tipped back by `lean`, turned by `yaw`, slid so the
+ *    nearest corner stops `clearance` in front of the surface (a yawed
+ *    sleeve's near top corner is the one that used to go through the brick).
+ *    wallZ = a wall plane z = wallZ facing +z; plane = any vertical surface,
+ *    its normal toward the sleeve. Returns { position, quaternion, lean, gap, foot }.
+ *  standOnLedge(sleeve, ledgeSpec, { lean?, yaw?, clearance? }) → LeanPose & { fits }
+ *    an LP face-out on a shelf/ledge, leaning back on the surface behind;
+ *    the lean is reduced until the foot fits on the shelf (behind its lip).
+ *  makeLedge({ width?, depth?, lip? }) → { group, spec, update() }
+ *    the small black-steel display ledge (ref4). Put the group on the surface
+ *    (turned to face out), then standOnLedge(sleeve, ledge.update()).
+ *  planeClearance(obj, worldPlane) → min signed distance (world units, < 0 = through)
+ *    to verify any pose; localBounds(obj) → its Box3 in its own frame.
+ *
+ *    leanAgainst(sleeve, { wallZ: SET.wallZ, floorY: 0, x: -4.9, lean: 0.11, yaw: 0.06 })
  *
  * ─── art (all canvas textures; draw now, redraw when the fonts land) ───────
  *
@@ -132,6 +163,9 @@ import {
  *  companyTexture({ paper?, hole?, inner? }) 512², the 7" company sleeve (or the 12" inner)
  *  coverAtlas(covers, back?)               2048² 4×4 atlas for CrateRig fillers
  *  catNo(n) → 'GLY-00n' · loadCover(url, { size, square, focus }) · draw*() to paint your own canvases
+ *  FONT.display (titles) · FONT.sans (= FONT.mono: everything else) · subFont(px, w?) · capsFont(px, w?)
+ *  fillText(ctx, text, x, y) / measure(ctx, text): set "33⅓" from Inter Tight's own figures
+ *  loadVinylFonts() waits for exactly these faces (Alfa Slab One 400, Inter Tight 400–700)
  *  Art textures FREEZE once settled (fonts + photo): the canvas is freed after
  *  the upload. To change art, make a new texture (and dispose the old one).
  *
@@ -206,6 +240,9 @@ export {
 }
 export { drawRoundel, ringText, drawCoverImage, INKS, RIM_TEXT } from './art'
 export { loadVinylFonts }
+export { fillText, measure, subFont, capsFont } from './art'
+export { leanAgainst, standOnLedge, makeLedge, planeClearance, localBounds } from './place'
+export type { LeanOpts, LeanPose, LedgeSpec, Ledge, Placeable } from './place'
 export type { CoverSpec, LabelSpec, TracklistSpec, CompanySleeveSpec, CoverSource, RecordDims, CrateDims, CrateShade }
 export type { Track, SideSpec, PaperName } from './art'
 
@@ -624,7 +661,7 @@ export function makeCrate(opts: CrateOpts = {}): Crate {
       ctx.fillStyle = 'rgba(214,211,204,0.9)'
       ctx.textBaseline = 'middle'
       ;(ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '6px'
-      ctx.font = `500 22px ${FONT.mono}`
+      ctx.font = `600 22px ${FONT.mono}`
       ctx.textAlign = 'left'
       ctx.fillText(left, 40, 48)
       if (right) {
@@ -668,7 +705,8 @@ export function makeCrate(opts: CrateOpts = {}): Crate {
     update,
     slotZ(i, n) {
       const front = dims.zFront - 0.58
-      const room = front - (dims.zBack + dims.wall + 0.03)
+      // the back slot keeps room for its lean-back (its top never touches the back wall)
+      const room = front - (dims.zBack + dims.wall + 0.06)
       const step = Math.min(0.034, room / Math.max(1, n - 1))
       return front - i * step
     },
@@ -785,6 +823,12 @@ export class CrateRig {
   private jx: Float32Array
   private lean: Float32Array
   private tgt: Uint8Array
+  /** resolved in-crate pose per slot (floor z of the pivot, tip angle, roll): contact-solved each update */
+  private pz: Float32Array
+  private pa: Float32Array
+  private pr: Float32Array
+  /** each slot's resting angle on the stack (first contact falling onto the pile / the front rim) */
+  private th: Float32Array
   private kicks: Kick[] = []
   private spin = 0
   private spinBoost = 0
@@ -805,7 +849,12 @@ export class CrateRig {
   private e = new THREE.Euler()
   private one = new THREE.Vector3(1, 1, 1)
   private y0: number
-  private th0: number
+  private kv = new THREE.Vector3()
+  private bA = box2()
+  private bB = box2()
+  /** the crate's front and back walls in side view */
+  private wallF: Box2
+  private wallB: Box2
 
   constructor(o: CrateRigOpts) {
     this.crate = o.crate
@@ -829,16 +878,40 @@ export class CrateRig {
     this.jx = new Float32Array(n)
     this.lean = new Float32Array(n)
     this.tgt = new Uint8Array(n)
+    this.pz = new Float32Array(n)
+    this.pa = new Float32Array(n)
+    this.pr = new Float32Array(n)
+    this.th = new Float32Array(n)
     const C = this.crate.dims
     this.y0 = C.y0
-    this.th0 = Math.atan((C.zFront - C.wall - (C.zFront - 0.44)) / (C.frontH - C.y0)) - 0.016
+    this.wallF = box2(C.zFront - C.wall / 2, (C.feet + C.frontH) / 2, 0, 1, (C.frontH - C.feet) / 2, C.wall / 2)
+    this.wallB = box2(C.zBack + C.wall / 2, (C.feet + C.backH) / 2, 0, 1, (C.backH - C.feet) / 2, C.wall / 2)
+    // standing neighbours may differ in lean only by what the slot gap allows (tops never touch)
+    const step = n > 1 ? Math.abs(this.crate.slotZ(0, n) - this.crate.slotZ(1, n)) : 0.034
+    const leanVar = clamp(step - SLEEVE.t - 0.005, 0, 0.024)
     for (let i = 0; i < n; i++) {
       const h = Math.sin(i * 91.7 + 3.1) * 43758.5453
       const r = h - Math.floor(h)
       const h2 = Math.sin(i * 37.3 + 1.7) * 23421.631
       const r2 = h2 - Math.floor(h2)
       this.jx[i] = (r - 0.5) * 0.018
-      this.lean[i] = -0.03 + (r2 - 0.5) * 0.024
+      this.lean[i] = -0.03 + (r2 - 0.5) * leanVar
+    }
+    // the stack: each sleeve falls forward until it meets the front rim or the pile
+    for (let i = 0; i < n; i++) {
+      const z = this.zStack(i)
+      this.pz[i] = z
+      let a = this.lean[i]
+      let b = 1.45
+      if (this.clearAt(i, z, b, 0)) a = b
+      else
+        for (let it = 0; it < 30; it++) {
+          const mid = (a + b) / 2
+          if (this.clearAt(i, z, mid, 0)) a = mid
+          else b = mid
+        }
+      this.th[i] = a
+      this.pa[i] = a
     }
     const g = this.crate.group
     for (const s of this.sleeves) {
@@ -937,8 +1010,8 @@ export class CrateRig {
     }
     const pUp = k >= 0 ? outBack(segment(s, RIG_PHASE.rise[0], RIG_PHASE.rise[1]), 0.9) : 0
     const pDown = k >= 0 ? inOutCubic(segment(s, RIG_PHASE.fall[0], RIG_PHASE.fall[1])) : 0
-    const lift = k >= 0 ? (s < RIG_PHASE.fall[0] ? pUp : 1 - pDown) : 0
-    const slide = k >= 0 ? outBack(segment(s, RIG_PHASE.out[0], RIG_PHASE.out[1]), 1.1) * (1 - inOutCubic(segment(s, RIG_PHASE.home[0], RIG_PHASE.home[1]))) : 0
+    let lift = k >= 0 ? (s < RIG_PHASE.fall[0] ? pUp : 1 - pDown) : 0
+    let slide = k >= 0 ? outBack(segment(s, RIG_PHASE.out[0], RIG_PHASE.out[1]), 1.1) * (1 - inOutCubic(segment(s, RIG_PHASE.home[0], RIG_PHASE.home[1]))) : 0
     this.k = k
     this.s = s
     this.lift = lift
@@ -963,6 +1036,17 @@ export class CrateRig {
         this.flipV[i] = 0
       }
     } else this.stepPhysics(frame)
+    if (k >= 0) {
+      // physical order: the sleeve can't come up while it's still lying on the
+      // pile (a reverse scrub) or before the one in front has fallen out of the way
+      lift *= 1 - smoothstep(0.02, 0.3, this.flip[k])
+      if (k > 0) lift *= smoothstep(0.5, 0.92, this.flip[k - 1])
+      this.lift = lift
+      // the record only comes out of a sleeve that's all the way up
+      slide *= smoothstep(0.7, 0.97, lift)
+      this.out = slide
+    }
+    this.solveStack()
 
     // featured sleeves
     for (let i = 0; i < nf; i++) {
@@ -1049,9 +1133,9 @@ export class CrateRig {
             v += (-K * (x - 1) - (reduced ? 22 : 13) * v) * h
           }
           x += v * h
-          if (!reduced && x > 1.03 && v > 0) {
+          if (!reduced && x > 1 && v > 0) {
             const impact = v
-            x = 1.03
+            x = 1
             v = -v * 0.3
             // the stack beneath recoils
             for (let j = i - 1, d = 0; j >= 0 && d < 5; j--, d++) if (this.flip[j] > 0.9) this.wobV[j] += impact * 0.05 * Math.pow(0.6, d)
@@ -1082,35 +1166,115 @@ export class CrateRig {
   private zUp(i: number) {
     return this.crate.slotZ(i, this.n)
   }
+  /**
+   * A flipped sleeve's pivot on the floor, stepping back through the pile
+   * (never past the back wall). 0.04 lets neighbours lie parallel
+   * at the rim's ~65° (a board's thickness apart); a tighter crate's pile
+   * stands up a little steeper, as a real one does.
+   */
   private zStack(i: number) {
     const C = this.crate.dims
-    const step = Math.min(0.024, 0.9 / Math.max(1, this.n))
-    return C.zFront - 0.44 - i * step
+    const n = this.n
+    const z0 = C.zFront - 0.44
+    // the pile's pivots must stay ahead of the sleeves still standing behind it (≥ 0.02)
+    const slot = n > 1 ? this.crate.slotZ(0, n) - this.crate.slotZ(1, n) : 0.034
+    const lead = z0 - this.crate.slotZ(0, n) - 0.02
+    const step = Math.min(0.04, (z0 - (C.zBack + C.wall + 0.03)) / Math.max(1, n - 1), n > 2 ? (lead + (n - 1) * slot) / (n - 2) : 0.04)
+    return z0 - i * step
   }
-  private thStack(i: number) {
-    return Math.atan(Math.tan(this.th0) + i * Math.min(0.045, 1.6 / Math.max(1, this.n)))
+  /** the pivot's lift off the floor so the lowest edge rests ON it (tip a, roll r) */
+  private liftOf(a: number, r: number) {
+    return 0.5 * Math.abs(Math.sin(r)) * Math.cos(a) + (SLEEVE.t / 2) * Math.abs(Math.sin(a)) + 0.0005
   }
 
-  /** In-crate transform: upright in its slot ↔ lying forward on the stack. */
+  /** 2D (z, y) box of a sleeve in the crate: pivot on the floor at z, tipped forward by a, rolled by r */
+  private box2(z: number, a: number, r: number, o: Box2) {
+    const hl = 0.5 + 0.5 * Math.abs(Math.sin(r))
+    o.uz = Math.sin(a)
+    o.uy = Math.cos(a)
+    o.cz = z + o.uz * 0.5
+    o.cy = this.y0 + this.liftOf(a, r) + o.uy * 0.5
+    o.hl = hl
+    o.ht = SLEEVE.t / 2
+    return o
+  }
+  /**
+   * Is slot i clear at (z, a, r)? Checks the front rim, the back wall and
+   * the three sleeves in front of it (their resolved poses), with a ~0.6 mm
+   * air gap. Sleeves share x, so the side view decides.
+   */
+  private clearAt(i: number, z: number, a: number, r: number, back = true) {
+    const A = this.box2(z, a, r, this.bA)
+    if (sep2(A, this.wallF) < CONTACT_GAP || (back && sep2(A, this.wallB) < CONTACT_GAP)) return false
+    const held = this.k >= 0 && this.lift > 0.0005 ? this.k : -1
+    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+      if (j === held) continue
+      if (sep2(A, this.box2(this.pz[j], this.pa[j], this.pr[j], this.bB)) < CONTACT_GAP) return false
+    }
+    return true
+  }
+
+  /**
+   * Resolve every in-crate pose front → back: the target from flip/wobble,
+   * then — if that would pass through the rim, the back wall or the sleeves
+   * in front — tipped back (up) to the contact. The pile never interpenetrates,
+   * a landing never sinks into it, a wobble pushes its neighbours instead of
+   * passing through them.
+   */
+  private solveStack() {
+    const held = this.k >= 0 && this.lift > 0.0005 ? this.k : -1
+    for (let i = 0; i < this.n; i++) {
+      const x = this.flip[i]
+      const xs = clamp(x)
+      const sm = xs * xs * (3 - 2 * xs)
+      const z = lerp(this.zUp(i), this.zStack(i), sm)
+      const r = (this.jx[i] * 2 - 0.004) * (1 - xs)
+      let a = lerp(this.lean[i], this.th[i], xs) + this.wob[i] * (1 - 0.6 * xs)
+      this.pz[i] = z
+      this.pr[i] = r
+      if (i !== held && !this.clearAt(i, z, a, r, false)) {
+        // tipping back only moves it away from what's in front: bisect to the contact
+        let lo = Math.min(a, this.lean[i]) - 0.3
+        let hi = a
+        for (let it = 0; it < 18; it++) {
+          const mid = (lo + hi) / 2
+          if (this.clearAt(i, z, mid, r, false)) lo = mid
+          else hi = mid
+        }
+        a = lo
+      }
+      this.pa[i] = a
+    }
+  }
+
+  /** In-crate transform (resolved by solveStack): upright in its slot ↔ lying forward on the stack. */
   private crateMatrix(i: number, out: THREE.Matrix4) {
-    const x = this.flip[i]
-    const xs = clamp(x)
-    const sm = xs * xs * (3 - 2 * xs)
-    const z = lerp(this.zUp(i), this.zStack(i), sm)
-    const a = lerp(this.lean[i], this.thStack(i), x) + this.wob[i] * (1 - 0.6 * xs)
-    this.e.set(a, 0, (this.jx[i] * 2 - 0.004) * (1 - xs))
+    const a = this.pa[i]
+    const r = this.pr[i]
+    this.e.set(a, 0, r)
     this.q.setFromEuler(this.e)
-    out.compose(this.v.set(this.jx[i], this.y0, z), this.q, this.one)
+    out.compose(this.v.set(this.jx[i], this.y0 + this.liftOf(a, r), this.pz[i]), this.q, this.one)
   }
 
   /**
    * Out of the crate and into the hand: straight up out of the slot, then over
-   * to the presentation point, turning to face the lens.
+   * to the presentation point, turning to face the lens. Starts exactly at its
+   * in-crate pose; while any corner is still below the crate's rim it is kept
+   * inside the walls (the hand-held tilt can't push a corner through).
    */
   private presentMatrix(i: number, p: number, out: THREE.Matrix4) {
     const at = this.present
-    const slot = this.v.set(this.jx[i], this.y0 + 0.5, this.zUp(i))
-    const ctrl = this.v2.set(slot.x, at.y - 0.12, slot.z)
+    // it leaves from its in-crate pose (standing, or part-way up off the pile
+    // on a reverse scrub): centre and orientation
+    const a0 = this.pa[i]
+    const r0 = this.pr[i]
+    this.e.set(a0, 0, r0)
+    this.q.setFromEuler(this.e)
+    const slot = this.v
+      .set(0, 0.5, 0)
+      .applyQuaternion(this.q)
+      .add(this.v2.set(this.jx[i], this.y0 + this.liftOf(a0, r0), this.pz[i]))
+    const ctrl = this.v2.set(slot.x, Math.max(at.y - 0.12, slot.y), slot.z)
     const t = Math.max(0, p)
     const u1 = 1 - t
     const c = this.held.center
@@ -1122,8 +1286,6 @@ export class CrateRig {
     }
     // idle float once presented
     c.y += Math.sin(this.time * 1.1 + i) * 0.006 * clamp(t)
-    this.e.set(this.lean[i], 0, 0)
-    this.q.setFromEuler(this.e)
     dirOf(this.yaw[i % this.yaw.length], this.pitch, this.D)
     this.m4b.lookAt(c, this.v3.copy(c).add(this.D), UP)
     this.q2.setFromRotationMatrix(this.m4b)
@@ -1134,8 +1296,64 @@ export class CrateRig {
     const tilt = Math.sin(clamp(t) * Math.PI) * 0.07
     this.q.setFromAxisAngle(this.v3.set(0, 0, 1), tilt * (i % 2 ? 1 : -1))
     hq.multiply(this.q)
+    this.keepInCrate(c, hq)
     out.compose(c, hq, this.one).multiply(this.pivotDown)
   }
+
+  /** nudge a held sleeve (centre c, orientation q) so no corner below the rim passes a wall */
+  private keepInCrate(c: THREE.Vector3, q: THREE.Quaternion) {
+    const C = this.crate.dims
+    const m = 0.006
+    let px = 0
+    let nx = 0
+    let fz = 0
+    let bz = 0
+    const p = this.kv
+    for (let k = 0; k < 8; k++) {
+      p.set(k & 1 ? 0.5 : -0.5, k & 2 ? 0.5 : -0.5, k & 4 ? SLEEVE.t / 2 : -SLEEVE.t / 2)
+        .applyQuaternion(q)
+        .add(c)
+      if (p.z > C.zBack && p.z < C.zFront && p.y < rimAtDims(p.z, C) + m) {
+        px = Math.max(px, p.x - (C.inner - m))
+        nx = Math.max(nx, -(C.inner - m) - p.x)
+      }
+      // (only corners at the walls: a presentation point out in front of the crate stays where it is)
+      const onX = Math.abs(p.x) < C.inner + C.wall
+      if (onX && p.y < C.frontH + m && p.z < C.zFront + C.wall) fz = Math.max(fz, p.z - (C.zFront - C.wall - m))
+      if (onX && p.y < C.backH + m && p.z > C.zBack - C.wall) bz = Math.max(bz, C.zBack + C.wall + m - p.z)
+    }
+    c.x += nx - px
+    c.z += bz - fz
+  }
+}
+
+/** the air gap solveStack keeps between sleeves / the crate (kit units, ~0.6 mm) */
+const CONTACT_GAP = 0.002
+/** an oriented box in the crate's side view (z, y): centre, unit length axis (uz, uy), half length, half thickness */
+interface Box2 {
+  cz: number
+  cy: number
+  uz: number
+  uy: number
+  hl: number
+  ht: number
+}
+const box2 = (cz = 0, cy = 0, uz = 0, uy = 1, hl = 0.5, ht = 0.5): Box2 => ({ cz, cy, uz, uy, hl, ht })
+/** separating distance of two side-view boxes (SAT; > 0 apart, < 0 overlapping) */
+function sep2(A: Box2, B: Box2) {
+  const dz = B.cz - A.cz
+  const dy = B.cy - A.cy
+  let best = -Infinity
+  // axes: A's length / normal, B's length / normal
+  const axes = [A.uz, A.uy, A.uy, -A.uz, B.uz, B.uy, B.uy, -B.uz]
+  for (let k = 0; k < 8; k += 2) {
+    const lz = axes[k]
+    const ly = axes[k + 1]
+    const rA = A.hl * Math.abs(lz * A.uz + ly * A.uy) + A.ht * Math.abs(lz * A.uy - ly * A.uz)
+    const rB = B.hl * Math.abs(lz * B.uz + ly * B.uy) + B.ht * Math.abs(lz * B.uy - ly * B.uz)
+    best = Math.max(best, Math.abs(lz * dz + ly * dy) - rA - rB)
+  }
+  return best
 }
 
 /** camera view direction for a yaw/pitch (degrees): yaw 0 looks along -z, pitch > 0 looks down */
