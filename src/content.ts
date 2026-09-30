@@ -42,6 +42,9 @@ export const LINKS = {
   app: { label: 'Download the Mobile App', url: 'https://apps.apple.com/gb/app/glory-beer-bar-kitchen/id1487567902' },
   untappd: { label: 'See UNTAPPD for additional info!', url: 'https://untappd.com/v/glory-beer-bar-and-kitchen/8087407' },
   events: { label: 'Upcoming Events', url: 'https://www.gloryphilly.com/events.php' },
+  /** gloryphilly.com's printable menu (drafts with location/style/ABV/pours/prices + the All Day Menu).
+   *  Mike (2026-09-30): the Bar and Kitchen nav items link straight here. */
+  menus: { label: 'Menu', url: 'https://www.gloryphilly.com/menus/' },
 }
 
 export const SOCIALS = [
@@ -523,4 +526,72 @@ export const CITY_WIDE = {
     { id: 'shot', name: 'Old Overholt Rye', detail: 'A shot of' },
     { id: 'cheese', name: 'Swiss cheese', detail: 'A cube of' },
   ],
+}
+
+// ─── EVENT INQUIRY FORM ─────────────────────────────────────────────────────
+
+/**
+ * The Event Inquiry Form (src/ui/eventForm.ts): gloryphilly.com's own fields
+ * (EVENTS.fields, "All form fields are required.") and the note for parties
+ * of more than 10, addressed to Dave. Buttons, status lines and error
+ * messages are plain descriptions of what the form does — no claims, no
+ * promises about replies.
+ *
+ *   endpoint          the Worker's URL (worker/README.md). Empty: the inquiry
+ *                     is written into the visitor's email app (mailto), so
+ *                     the form works on the static host today.
+ *   turnstileSiteKey  Cloudflare Turnstile's public site key (used with an endpoint)
+ */
+export const EVENT_FORM = {
+  endpoint: '',
+  turnstileSiteKey: '',
+  to: EVENTS.email,
+  /** the email subject (the Worker adds " — <name>") */
+  subject: 'Event Inquiry',
+  brand: BRAND.name,
+  title: SECTIONS.events.eyebrow,
+  formName: EVENTS.cta,
+  labels: {
+    name: EVENTS.fields[0],
+    email: EVENTS.fields[1],
+    phone: EVENTS.fields[2],
+    date: EVENTS.fields[3],
+    summary: EVENTS.fields[4],
+  },
+  required: EVENTS_UI.required,
+  large: RESERVATIONS.large,
+  /** endpoint set: the form sends the inquiry itself */
+  submit: 'Send inquiry',
+  submitNote: `Your inquiry goes to ${EVENTS.email}.`,
+  /** no endpoint: the visitor's email app sends it */
+  submitMail: 'Email this inquiry',
+  submitMailNote: `Opens your email app with the inquiry filled in, addressed to ${EVENTS.email}.`,
+  sending: 'Sending…',
+  sentTitle: 'Request sent.',
+  sentBody: `Your event inquiry is on its way to ${EVENTS.email}.`,
+  again: 'Send another inquiry',
+  mailedTitle: 'Finish in your email app.',
+  mailedBody: `Your inquiry to ${EVENTS.email} is written and ready. Press Send in your email app to deliver it.`,
+  mailedHelp: 'No email app opened?',
+  copy: 'Copy the inquiry',
+  copied: 'Inquiry copied',
+  copyFailed: `Copy failed. The address is ${EVENTS.email}.`,
+  edit: 'Edit the inquiry',
+  /** the error summary's lead ("Please check 2 fields:") */
+  checkOne: 'Please check this field:',
+  checkMany: 'Please check these fields:',
+  errors: {
+    name: 'Enter your first and last name.',
+    email: 'Enter your email address.',
+    emailBad: 'Enter an email address like name@example.com.',
+    phone: 'Enter your phone number.',
+    phoneBad: 'Enter a phone number with its area code.',
+    date: 'Enter the date of your event.',
+    datePast: 'Enter a date from today onward.',
+    summary: 'Enter a short summary of your event.',
+    unverified: 'Please complete the verification.',
+    failed: 'Your inquiry could not be sent. Please try again.',
+    /** after any send error: the way round it, with the address linked (a pre-filled email) */
+    fallback: 'You can also email it to',
+  },
 }

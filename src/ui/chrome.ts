@@ -50,6 +50,8 @@ import { publishTextures } from './texture'
 
 /** the primary nav on desktop (business names, in story order) */
 const NAV = ['taps', 'kitchen', 'events', 'visit']
+/** nav items that open gloryphilly.com's printable menu instead of landing on their chapter (Mike, 2026-09-30) */
+const MENU_LINKS: Record<string, string> = { taps: 'Bar menu', kitchen: 'Kitchen menu' }
 /** the story as a record's tracklist: side A is the first half (rounded up), side B the rest — A1 … A4, B1 … B3 */
 export const trackCode = (i: number, total: number) => {
   const a = Math.ceil(total / 2)
@@ -99,8 +101,14 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   const reserve = (cls: string) =>
     `<a class="hud-btn ${cls}" href="${esc(LINKS.reserve.url)}" target="_blank" rel="noopener" data-reserve><span>${esc(LINKS.reserve.label)}</span>${EXT_IC}${NEW_TAB}</a>`
 
+  const menuLink = (id: string, cls: string, inner: string) =>
+    `<a class="${cls}" href="${esc(LINKS.menus.url)}" target="_blank" rel="noopener" data-menu-link aria-label="${esc(MENU_LINKS[id])} (opens in a new tab)">${inner}</a>`
   const links = NAV.filter(id => indexOf(id) >= 0)
-    .map(id => `<li><a class="ch-link" href="#${id}" data-go="${id}"><i class="ch-led" aria-hidden="true"></i><span>${esc(biz(id))}</span></a></li>`)
+    .map(id =>
+      MENU_LINKS[id]
+        ? `<li>${menuLink(id, 'ch-link', `<i class="ch-led" aria-hidden="true"></i><span>${esc(biz(id))}</span>${EXT_IC}`)}</li>`
+        : `<li><a class="ch-link" href="#${id}" data-go="${id}"><i class="ch-led" aria-hidden="true"></i><span>${esc(biz(id))}</span></a></li>`,
+    )
     .join('')
 
   const sideA = Math.ceil(total / 2)
@@ -112,14 +120,16 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
     .join('')
 
   const rows = slots
-    .map(
-      (s, i) =>
-        `<li><a class="ch-ml" href="#${s.def.id}" data-go="${s.def.id}" aria-label="${esc(biz(s.def.id, s.def.label))}, ${trackCode(i, total)}: ${esc(s.def.label)}">
+    .map((s, i) => {
+      const inner = `
           <span class="ch-ml-n" aria-hidden="true">${trackCode(i, total)}</span>
-          <span class="ch-ml-name" aria-hidden="true">${esc(biz(s.def.id, s.def.label))}</span>
-          <span class="ch-ml-lab" aria-hidden="true">${esc(s.def.label)}</span>
-        </a></li>`,
-    )
+          <span class="ch-ml-name" aria-hidden="true">${esc(biz(s.def.id, s.def.label))}${MENU_LINKS[s.def.id] ? EXT_IC : ''}</span>
+          <span class="ch-ml-lab" aria-hidden="true">${esc(MENU_LINKS[s.def.id] ?? s.def.label)}</span>`
+      return MENU_LINKS[s.def.id]
+        ? `<li>${menuLink(s.def.id, 'ch-ml', inner)}</li>`
+        : `<li><a class="ch-ml" href="#${s.def.id}" data-go="${s.def.id}" aria-label="${esc(biz(s.def.id, s.def.label))}, ${trackCode(i, total)}: ${esc(s.def.label)}">${inner}
+        </a></li>`
+    })
     .join('')
 
   const hours = hoursSummary()
@@ -207,7 +217,7 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   root.addEventListener('click', e => {
     const t = e.target as Element
     // the reservation pill leaves for Toast: a clink, then let it go
-    if (t.closest('[data-reserve]')) {
+    if (t.closest('[data-reserve], [data-menu-link]')) {
       sound.blip(6)
       return
     }
