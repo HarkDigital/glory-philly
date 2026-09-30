@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { BRAND, DRAFTS, SOCIALS } from '../../content'
 import { makeBarTop } from '../bar'
 import { catNo, coverTexture, makeSleeve, makeTurntable, type Sleeve, type Turntable } from '../vinyl'
-import { poolHook, roomMaterials, withPools, type RoomMaterials } from './materials'
+import { AMBIENT_TINT, HALO_K, kitPools, poolHook, roomMaterials, withPools, type RoomMaterials } from './materials'
 import {
   T,
   addBottleRow,
@@ -12,6 +12,7 @@ import {
   addCooler,
   addCounter,
   addDuct,
+  addDuctTrunk,
   addGlassRows,
   addHifi,
   addLeaningSleeve,
@@ -35,6 +36,7 @@ import {
   brickPanelMapsAsync,
   coolerMap,
   ductMaps,
+  galvMaps,
   glowTexture,
   grainDetail,
   hifiMaps,
@@ -117,14 +119,14 @@ export function assemble(o: KitOpts, fill: (c: Ctx) => { turntable?: Turntable |
     group.add(l)
     lights.push(l)
   }
-  const amb = new THREE.Color(1, 0.84, 0.68).multiplyScalar(o.ambient ?? 0.3)
+  const amb = AMBIENT_TINT.clone().multiplyScalar(o.ambient ?? 0.3)
   M.pools.uniforms.uPoolAmb.value.copy(amb)
   const setAmbient = (k: number) => M.pools.uniforms.uPoolAmb.value.copy(amb).multiplyScalar(k)
   const fil = M.filament.color.clone()
   const bulbE = M.bulb.emissiveIntensity
   const setGlow = (k: number) => {
     M.pools.k = k
-    M.glow.uniforms.uK.value = 0.5 * k
+    M.glow.uniforms.uK.value = HALO_K * k
     M.filament.color.copy(fil).multiplyScalar(Math.max(0.02, k))
     M.bulb.emissiveIntensity = bulbE * k
     M.bottleGlow.value = 0.12 * (0.35 + 0.65 * k)
@@ -342,7 +344,8 @@ export function makeBackBar(o: BackBarOpts = {}): RoomKit {
     if (o.ceiling) {
       const ch = H + 0.35
       box(c, c.M.ceiling, X1 - X0 + 2, 0.02, 4, 0, ch + 0.01, 2)
-      addDuct(c, [new THREE.Vector3(X0 - 1, ch - 0.34, 2.3), new THREE.Vector3(0, ch - 0.36, 2.25), new THREE.Vector3(X1 + 1, ch - 0.33, 2.2)], { radius: 0.24, ceilingY: ch })
+      // ref1: a long straight galvanized trunk tight under the black ceiling
+      addDuctTrunk(c, [new THREE.Vector3(X0 - 1, 0, 2.25), new THREE.Vector3(X1 + 1, 0, 2.25)], { width: 0.56, height: 0.3, ceilingY: ch })
       A.pendant = addPendant(c, { x: -1.6, y: ch, z: 1.35, drop: 0.85 })
       bulbs.push(A.pendant.clone())
     }
@@ -388,6 +391,8 @@ export async function prepareRoom(o: { backBar?: BackBarOpts } = {}) {
   hifiMaps()
   coolerMap()
   ductMaps()
+  await nextFrame()
+  galvMaps()
   rubberData()
   glowTexture()
   pitchTexture()
@@ -535,8 +540,16 @@ export interface CeilingOpts extends KitOpts {
   depth?: number
   /** the ceiling's height above the floor (default 3.45) */
   height?: number
-  /** duct runs (defaults: one big run along x); points are metres in the kit's frame */
-  ducts?: { pts: THREE.Vector3[]; radius?: number }[]
+  /**
+   * duct runs (default: one long straight trunk along x); points are metres in
+   * the kit's frame. shape 'rect' (as in ref1; the default when no `radius` is
+   * given): a galvanized trunk along the pts' xz, its top tight under the
+   * ceiling (the pts' y is ignored; near-straight wobbles are straightened),
+   * `size` [width, height] (default [0.6, 0.32]). 'flex' (the default when an
+   * entry gives a `radius`, as the first API did): round silver flex duct
+   * through the pts, strapped.
+   */
+  ducts?: { pts: THREE.Vector3[]; radius?: number; shape?: 'rect' | 'flex'; size?: [number, number]; conduit?: boolean }[]
   /** pendants: x, z and drop below the ceiling (defaults: three) */
   pendants?: { x: number; z: number; drop?: number }[]
   /** black joists across (default true) */
@@ -558,10 +571,21 @@ export function makeCeiling(o: CeilingOpts = {}): RoomKit {
     const bulbs: THREE.Vector3[] = []
     box(c, c.M.ceiling, w, 0.03, d, 0, H + 0.015, d / 2)
     if (o.beams !== false) for (let x = -w / 2 + 0.6; x < w / 2; x += 1.2) box(c, c.M.ceiling, 0.1, 0.22, d, x, H - 0.11, d / 2)
-    const ducts = o.ducts ?? [{ pts: [new THREE.Vector3(-w / 2, H - 0.52, d * 0.34), new THREE.Vector3(0, H - 0.54, d * 0.36), new THREE.Vector3(w / 2, H - 0.5, d * 0.33)], radius: 0.26 }]
+    // what the duct hangs under: the joists' bottoms (or the ceiling itself)
+    const under = o.beams !== false ? H - 0.22 : H
+    const ducts = o.ducts ?? [{ pts: [new THREE.Vector3(-w / 2, 0, d * 0.34), new THREE.Vector3(w / 2, 0, d * 0.34)] }]
     ducts.forEach((k, i) => {
-      addDuct(c, k.pts, { radius: k.radius ?? 0.24, ceilingY: H - 0.22 })
-      A[`duct${i}`] = k.pts[Math.floor(k.pts.length / 2)].clone()
+      // (entries written for the old flex-only API — a radius, no shape — stay flex)
+      if ((k.shape ?? (k.radius != null ? 'flex' : 'rect')) === 'flex') {
+        addDuct(c, k.pts, { radius: k.radius ?? 0.24, ceilingY: under })
+        A[`duct${i}`] = k.pts[Math.floor(k.pts.length / 2)].clone()
+      } else {
+        const [dw, dh] = k.size ?? (k.radius ? [k.radius * 2.4, k.radius * 1.3] : [0.6, 0.32])
+        addDuctTrunk(c, k.pts, { width: dw, height: dh, ceilingY: under, conduit: k.conduit !== false })
+        const m = k.pts[Math.floor(k.pts.length / 2)]
+        const m0 = k.pts[Math.floor((k.pts.length - 1) / 2)]
+        A[`duct${i}`] = new THREE.Vector3((m.x + m0.x) / 2, under - 0.03 - dh / 2, (m.z + m0.z) / 2)
+      }
     })
     const pend = o.pendants ?? [
       { x: -2.2, z: d * 0.62, drop: 0.95 },
@@ -604,7 +628,7 @@ export function makeBarRun(o: BarRunOpts = {}): RoomKit {
     const top = makeBarTop({ length: L, depth: D, thickness: 0.06 })
     // the long bar is oiled light oak-honey (ref1): lift kit/bar's darker planks
     ;(top.material as THREE.MeshPhysicalMaterial).color.setRGB(1.7, 1.55, 1.38)
-    withPools(top.material as THREE.MeshPhysicalMaterial, c.M.pools, 'bartop')
+    kitPools(top.material as THREE.MeshPhysicalMaterial, c.M.pools, 'bartop')
     c.hooks.push(top)
     top.position.set(0, H, 0)
     top.matrixAutoUpdate = true

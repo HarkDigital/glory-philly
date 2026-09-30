@@ -1,262 +1,349 @@
 import * as THREE from 'three'
-import { makeBrickWall, makeBarTop } from '../../kit/bar'
-import { makeSleeve, makeRecord, SEVEN, REC12, REC7, type Sleeve, type Record as VinylRecord } from '../../kit/vinyl'
+import { assemble, prepareRoom, brickPanelMapsAsync, withPools, type RoomKit } from '../../kit/room'
+import {
+  addBottleRow,
+  addBottleSteps,
+  addBrickPanel,
+  addCounter,
+  addDuct,
+  addPendant,
+  addPlankColumn,
+  addPlankWall,
+  addRecordLedge,
+  addRecordRow,
+  addRecordShelf,
+  addSconce,
+  addShelf,
+  box,
+  wood,
+} from '../../kit/room/pieces'
+import { leanAgainst, makeRecord, makeSleeve, planeClearance, SEVEN, type Record as VinylRecord, type Sleeve } from '../../kit/vinyl'
 
 /*
- * THE CREW's set: a stretch of Glory's exposed brick with three record-store
- * "now playing" displays on it — a 12" sleeve (the portrait is the cover)
- * standing on a black steel rail, its record half out showing the label —
- * each under a brass picture light; a 7" single (The Glorious Archibald)
- * between two of them; a wooden ledge below (the stout sits there).
+ * THE CREW's set: a run of Glory's real back wall (Mike's ref4 is this
+ * chapter — a walnut plank column with ONE LP face-out on a small black
+ * steel ledge under a wire-cage bulb, records packed on the shelves beside
+ * it), built from the room kit (src/kit/room) as ONE kit, so every bulb's
+ * light pool falls on all of the walnut, the records and the portraits:
  *
- * World layout: the wall is the plane z = 0; display i's sleeve stands on a
- * rail at y = RAIL_Y, centred on x = FRAME_X[i]; the ledge's top is y = 0.
+ *   bay L │ DAVE's column │ bay 1 │ KEVIN's column │ bay 2 │ PIER's column │ bay R
+ *
+ *   columns  boxy walnut-clad columns (wide vertical boards, trims) from the
+ *            back counter to the black ceiling; on each, a black steel
+ *            face-out ledge with the person's 12" sleeve (the portrait is the
+ *            cover), its record half out to the right showing the label, and
+ *            a wire-cage Edison sconce above
+ *   bays     shelves PACKED with LPs over a mirror strip and spouted liquor
+ *            steps on the counter; bay 2 carries the 7" singles, with The
+ *            Glorious Archibald face-out in front of them; bottles up top
+ *   bay R    an exposed-brick accent panel with two walnut shelves: the stout
+ *            stands on the lower one (the out-beat cranes down to it)
+ *   above    the black ceiling, silver flex duct, two wire-cage pendants
+ *
+ * Every sleeve is posed by kit/vinyl's leanAgainst from its real bounds (the
+ * record half out counts): the top edge keeps ~4 mm off the column (or the
+ * singles' spines), the foot stands on the steel behind its lip.
+ *
+ * UNITS: the kit is in metres; the chapter's world unit is SLEEVE_S / 0.315
+ * per metre (a 12" sleeve = 1.6 world units), and world y = 0 is the top of
+ * the portrait ledges.
  */
 
-/** where each person's display hangs (the sleeve's centre x) */
-export const FRAME_X = [0, 3.8, 7.6]
-/** the display rails' height on the wall */
-export const RAIL_Y = 1.1
-/** world size of a 12" sleeve on this wall */
+/** world size of a 12" sleeve (the chapter's scale) */
 export const SLEEVE_S = 1.6
+/** world units per metre */
+export const MPW = SLEEVE_S / 0.315
 
-let brickBump: THREE.CanvasTexture | null = null
-/**
- * A bump map registered to kit/bar.ts brickMap(): same running bond (8 rows,
- * 4 bricks a row, half-brick offset), mortar recessed, brick faces pitted and
- * softly rounded at the arrises, so grazing picture light rakes across real
- * relief.
- */
-function brickBumpMap(): THREE.CanvasTexture {
-  if (brickBump) return brickBump
-  const n = 512
-  const cv = document.createElement('canvas')
-  cv.width = cv.height = n
-  const g = cv.getContext('2d')!
-  g.fillStyle = '#000'
-  g.fillRect(0, 0, n, n)
-  let seed = 23
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-  const rows = 8
-  const bh = n / rows
-  const bw = n / 4
-  for (let row = 0; row < rows; row++) {
-    const off = row % 2 ? bw / 2 : 0
-    for (let c = -1; c < 5; c++) {
-      const x = c * bw + off
-      const y = row * bh
-      // rounded arris: three nested steps up to the face
-      const face = 150 + rnd() * 60
-      const steps = [
-        [3, 0.45],
-        [5, 0.75],
-        [7, 1],
-      ] as const
-      for (const [ins, k] of steps) {
-        const v = Math.round(face * k)
-        g.fillStyle = `rgb(${v},${v},${v})`
-        g.fillRect(x + ins, y + ins, bw - ins * 2, bh - ins * 2)
-      }
-      // pits, spall and a little fired-clay texture
-      for (let k = 0; k < 22; k++) {
-        const d = rnd() > 0.35
-        g.fillStyle = d ? `rgba(0,0,0,${0.18 + rnd() * 0.3})` : `rgba(255,255,255,${0.08 + rnd() * 0.12})`
-        const px = x + 7 + rnd() * (bw - 16)
-        const py = y + 7 + rnd() * (bh - 16)
-        g.beginPath()
-        g.arc(px, py, 0.8 + rnd() * rnd() * 4, 0, Math.PI * 2)
-        g.fill()
-      }
-    }
-  }
-  brickBump = new THREE.CanvasTexture(cv)
-  brickBump.colorSpace = THREE.NoColorSpace
-  brickBump.wrapS = brickBump.wrapT = THREE.RepeatWrapping
-  return brickBump
+/** the run, in metres (kit space: floor y = 0, the wall's face at z = WZ, the room toward +z) */
+export const ROOM = {
+  /** back counter top */
+  cy: 0.92,
+  /** the black ceiling */
+  ceil: 3.3,
+  /** column centres (Dave, Kevin, Pier) */
+  cols: [-1.22, 0, 1.22],
+  colW: 0.62,
+  /** column front face (from the wall plane z = 0) */
+  colD: 0.44,
+  /** the cladding's face */
+  WZ: 0.02,
+  /** the portrait ledges' top */
+  ledgeY: 1.52,
+  /** how far left of the column centre the sleeve stands (the record runs out to the right) */
+  sleeveOff: 0.1,
+  /** the lean back onto the column (radians) */
+  lean: 0.085,
+  /** sconce back plate (on the column's face) */
+  sconceY: 1.95,
+  /** first LP shelf in the bays */
+  recY: 1.45,
+  /** bay R: the brick panel's width and the stout's shelf */
+  brickW: 1.05,
+  brickY0: 1.02,
+  brickY1: 2.46,
+  stoutY: 1.2,
 }
 
-/**
- * The kit's brick wall, with slimmer courses (real brick is ~3:1: the UVs'
- * v is stretched on OUR geometry; the cached tile is never touched), deeper
- * relief from the bump above (registered to the same tile), and a darker,
- * drier face so the picture lights do the work.
- */
-export function makeWall(w: number, h: number): THREE.Mesh {
-  const wall = makeBrickWall(w, h, { tint: '#8a6c60' })
-  const uv = wall.geometry.attributes.uv as THREE.BufferAttribute
-  for (let i = 0; i < uv.count; i++) uv.setY(i, uv.getY(i) * 1.5)
-  uv.needsUpdate = true
-  const mat = wall.material as THREE.MeshStandardMaterial
-  mat.bumpMap = brickBumpMap()
-  mat.bumpScale = 2.2
-  mat.roughness = 0.94
-  mat.envMapIntensity = 0.25
-  return wall
-}
-
-const brass = () =>
-  new THREE.MeshStandardMaterial({ color: '#b08a4a', metalness: 1, roughness: 0.32, envMapIntensity: 1.2 })
-
-export interface Lamp {
-  /** origin = the backplate on the wall */
-  group: THREE.Group
-  spot: THREE.SpotLight
-  glow: THREE.MeshStandardMaterial
-}
-
-/**
- * A brass picture light: a backplate on the wall, an arm out to a half-round
- * hood with a warm tube inside, and a real (weak, shadowless) SpotLight that
- * washes what hangs below it and rakes the brick around it. `drop` = how far
- * below the plate its aim point is.
- */
-export function makeLamp(lw: number, drop: number): Lamp {
-  const group = new THREE.Group()
-  const ly = 0.18
-  const lz = 0.5
-  const b = brass()
-  const bIn = brass()
-  bIn.side = THREE.DoubleSide
-  // hood: a half-round brass trough, open toward the wall and down
-  const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, lw, 20, 1, true, -0.35, Math.PI), bIn)
-  hood.rotation.z = Math.PI / 2
-  hood.position.set(0, ly, lz)
-  group.add(hood)
-  for (const sx of [-1, 1]) {
-    const cap = new THREE.Mesh(new THREE.CircleGeometry(0.075, 20), bIn)
-    cap.rotation.y = (sx * Math.PI) / 2
-    cap.position.set((sx * lw) / 2, ly, lz)
-    group.add(cap)
-  }
-  const glow = new THREE.MeshStandardMaterial({ color: '#000', emissive: '#ffc27a', emissiveIntensity: 1.4 })
-  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, lw * 0.94, 10), glow)
-  tube.rotation.z = Math.PI / 2
-  tube.position.set(0, ly - 0.01, lz)
-  group.add(tube)
-  const plate = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.03), b)
-  plate.position.set(0, 0, 0.015)
-  group.add(plate)
-  const a0 = new THREE.Vector3(0, 0, 0.02)
-  const a1 = new THREE.Vector3(0, ly + 0.02, lz - 0.02)
-  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, a0.distanceTo(a1), 8), b)
-  arm.position.copy(a0).add(a1).multiplyScalar(0.5)
-  arm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), a1.clone().sub(a0).normalize())
-  group.add(arm)
-  const spot = new THREE.SpotLight('#fff0dc', 0, 0, 0.95, 0.85, 2)
-  spot.position.set(0, ly - 0.04, lz + 0.05)
-  spot.target.position.set(0, -drop, 0)
-  group.add(spot, spot.target)
-  return { group, spot, glow }
-}
+const L = ROOM
+/** the stout's x on bay R's lower shelf (from the bay's left edge, metres) */
+const PINT_AT = 0.44
+/** record half out of its sleeve (display-local, sleeve units): resting .. in focus */
+export const OUT: [number, number] = [0.57, 0.66]
 
 export interface Display {
-  /** origin: the sleeve's bottom-centre on the rail, on the wall plane */
-  group: THREE.Group
+  /** sleeve + record, posed in the kit's space (metres); scale = 0.315 m per sleeve unit */
+  holder: THREE.Group
   sleeve: Sleeve
   record: VinylRecord
-  lamp: Lamp | null
-  /** extents in display-local units (rail and lamp included) */
-  left: number
-  right: number
-  top: number
-  bottom: number
+  size: 12 | 7
+  /** WORLD box of the sleeve with its record fully out (for camera fits) */
+  box: THREE.Box3
+  /** WORLD centre of the sconce's bulb above it (12" displays) */
+  bulb: THREE.Vector3
+  /** index of its bulb's light pool (−1 = none) */
+  pool: number
+  /** clearance left to the surface behind (metres) — logged by the clip check */
+  gap: number
 }
 
-const steel = () => new THREE.MeshStandardMaterial({ color: '#131112', metalness: 0.55, roughness: 0.42, envMapIntensity: 0.8 })
+export interface CrewWall {
+  kit: RoomKit
+  /** the three portraits, left → right */
+  displays: Display[]
+  /** The Glorious Archibald, face-out in front of the singles */
+  single: Display
+  /** WORLD point on the stout's shelf where the pint stands (its base centre) */
+  pint: THREE.Vector3
+  /** the portraits' sconce pools: 0..1 (the one in focus up, the others lower) */
+  setLamp(i: number, k: number): void
+  dispose(): void
+}
 
-/**
- * The record-store "now playing" display: a black steel rail with a front
- * lip on the brick, the sleeve standing on it leaning back a touch, its
- * record half out to the right so the label shows, a picture light above.
- * `scale` = world size of a 12" sleeve; `out` = how far the record's centre
- * sits right of the sleeve's centre (in sleeve units).
- */
-export function makeDisplay({
-  front,
-  label,
-  size = 12,
-  scale = 1.6,
-  out,
-  lamp = true,
-  wear = 0.25,
-  seed = 0,
-}: {
+interface DisplaySpec {
   front: THREE.Texture
   label: THREE.Texture
   size?: 12 | 7
-  scale?: number
-  out?: number
-  lamp?: boolean
-  wear?: number
   seed?: number
-}): Display {
-  const group = new THREE.Group()
-  const k = size === 7 ? SEVEN : 1
-  const R = (size === 7 ? REC7 : REC12).R
-  const o = out ?? (size === 7 ? 0.44 : 0.64)
-  const S = scale
-  const sleeve = makeSleeve({ front, size, wear, seed, gloss: 0.4 })
-  sleeve.mesh.castShadow = true
-  const record = makeRecord({ label, size, seed: 11 + seed * 3, segments: 128 })
-  record.disc.castShadow = true
-  // the sleeve + record lean back against the wall from the rail
-  const holder = new THREE.Group()
-  holder.position.set(0, 0.004, 0.1)
-  holder.rotation.x = -0.055
-  holder.scale.setScalar(S)
-  record.group.position.set(o * k, 0.5 * k, 0)
-  record.setSpin(-0.08 - seed * 0.21)
-  holder.add(sleeve.group, record.group)
-  group.add(holder)
-
-  const left = -0.5 * k * S - 0.08
-  const right = (o * k + R) * S + 0.08
-  const rw = right - left
-  const rx = (left + right) / 2
-  const m = steel()
-  const shelf = new THREE.Mesh(new THREE.BoxGeometry(rw, 0.035, 0.18), m)
-  shelf.position.set(rx, -0.0175, 0.09)
-  const lip = new THREE.Mesh(new THREE.BoxGeometry(rw, 0.075, 0.016), m)
-  lip.position.set(rx, 0.02, 0.172)
-  const back = new THREE.Mesh(new THREE.BoxGeometry(rw, 0.06, 0.012), m)
-  back.position.set(rx, -0.04, 0.006)
-  for (const r of [shelf, lip, back]) {
-    r.castShadow = true
-    r.receiveShadow = true
-    group.add(r)
-  }
-
-  let lampOut: Lamp | null = null
-  let top = S * k
-  if (lamp) {
-    const cx = (left + right) / 2
-    lampOut = makeLamp(Math.min(rw * 0.55, 1.4), S * k * 0.5 + 0.12)
-    lampOut.group.position.set(cx, S * k + 0.14, 0)
-    group.add(lampOut.group)
-    top = S * k + 0.14 + 0.28
-  }
-  return { group, sleeve, record, lamp: lampOut, left, right, top, bottom: -0.06 }
 }
 
-/** The ledge below the frames: an oiled plank on black steel brackets. Top at y = 0. */
-export function makeLedge(length: number): THREE.Group {
-  const g = new THREE.Group()
-  const top = makeBarTop({ length, depth: 0.42, thickness: 0.08 })
-  top.position.z = 0.21
-  top.castShadow = true
-  g.add(top)
-  const steel = new THREE.MeshStandardMaterial({ color: '#141212', metalness: 0.6, roughness: 0.45 })
-  const nb = Math.max(2, Math.round(length / 3.2))
-  for (let i = 0; i <= nb; i++) {
-    const x = -length / 2 + 0.4 + ((length - 0.8) * i) / nb
-    const v = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.36, 0.035), steel)
-    v.position.set(x, -0.26, 0.02)
-    const hz = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.36), steel)
-    hz.position.set(x, -0.1, 0.19)
-    const br = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.38, 0.035), steel)
-    br.position.set(x, -0.25, 0.14)
-    br.rotation.x = 0.72
-    g.add(v, hz, br)
+/** the sleeve + its record half out to the right (label showing), in one group */
+function makeHolder(spec: DisplaySpec, out: number) {
+  const size = spec.size ?? 12
+  const k = size === 7 ? SEVEN : 1
+  const seed = spec.seed ?? 0
+  const sleeve = makeSleeve({ front: spec.front, size, wear: 0.25, seed, gloss: 0.4 })
+  sleeve.mesh.castShadow = true
+  const record = makeRecord({ label: spec.label, size, seed: 11 + seed * 3, segments: 128 })
+  record.disc.castShadow = true
+  record.group.position.set(out * k, 0.5 * k, 0)
+  record.setSpin(-0.08 - seed * 0.21)
+  const holder = new THREE.Group()
+  holder.add(sleeve.group, record.group)
+  holder.scale.setScalar(0.315)
+  return { holder, sleeve, record, size }
+}
+
+/**
+ * Build the wall (async: the room kit's maps are built across frames first).
+ * `people`: the three portraits' cover + label; `single`: the Archibald 7".
+ */
+export async function makeCrewWall(people: DisplaySpec[], single: DisplaySpec, mobile: boolean): Promise<CrewWall> {
+  const [c0, c1, c2] = L.cols
+  const half = L.colW / 2
+  // bays (clear x between the columns' side faces)
+  const bayL: [number, number] = [c0 - half - 1.35, c0 - half - 0.002]
+  const bay1: [number, number] = [c0 + half + 0.002, c1 - half - 0.002]
+  const bay2: [number, number] = [c1 + half + 0.002, c2 - half - 0.002]
+  const bayR: [number, number] = [c2 + half + 0.002, c2 + half + 0.002 + L.brickW]
+  const X0 = bayL[0] - 0.4
+  const X1 = bayR[1] + 1.6
+  const brickH = L.brickY1 - L.brickY0
+  const brick = { lines: [], seed: 12, soot: 0.45 }
+
+  await prepareRoom()
+  await brickPanelMapsAsync(L.brickW, brickH, brick)
+
+  const holders = people.map((p, i) => makeHolder({ ...p, seed: p.seed ?? i }, OUT[0]))
+  const archie = makeHolder({ ...single, size: 7, seed: single.seed ?? 3 }, 0.44)
+  const pools: number[] = []
+  const bulbs: THREE.Vector3[] = []
+  // singles: their spines stand no further out than this (addRecordRow: EPS + depth + max pull)
+  const singlesDepth = 0.16
+  const singlesFront = L.WZ + 0.004 + 0.181 + Math.max(0, singlesDepth + 0.03 - 0.181 - 0.004)
+  const yS = L.recY + 0.365 // bay 2: the singles stand on the LP shelf's top board
+
+  const kit = assemble({ scale: MPW, mobile, seed: 31, glow: 1.15, ambient: 0.3 }, c => {
+    const WZ = L.WZ
+    // walls, ceiling, counter
+    addPlankWall(c, X1 - X0, L.ceil, { depth: WZ, x: (X0 + X1) / 2 })
+    box(c, c.M.ceiling, X1 - X0 + 2, 0.03, 5, (X0 + X1) / 2, L.ceil + 0.015, 2.5)
+    for (let x = X0 + 0.3; x < X1; x += 1.2) box(c, c.M.ceiling, 0.1, 0.2, 5, x, L.ceil - 0.1, 2.5)
+    addCounter(c, X0, X1, { y: L.cy, d: 0.6 })
+    wood(c, X1 - X0, L.cy - 0.045, 0.58, (X0 + X1) / 2, (L.cy - 0.045) / 2, 0.29, { vertical: true, tile: 1.6 })
+    // the ceiling's silver flex duct and two wire-cage pendants in front of the wall
+    // (it runs just in front of the columns — 5 cm clear of their faces, 8 cm over the
+    // sconces' cages — and behind the pendants, low enough that the wide shot catches it
+    // along the top, as in ref1; the close shots stay under it)
+    addDuct(c, [new THREE.Vector3(X0, L.ceil - 0.77, 0.72), new THREE.Vector3((c0 + c1) / 2, L.ceil - 0.8, 0.7), new THREE.Vector3(X1, L.ceil - 0.77, 0.71)], {
+      radius: 0.19,
+      ceilingY: L.ceil - 0.2,
+    })
+
+    // the three portrait columns: walnut, a steel ledge, a sconce
+    L.cols.forEach((cx, i) => {
+      addPlankColumn(c, L.colW, L.colD - WZ, L.ceil - L.cy, { x: cx, y: L.cy, z: WZ })
+      c.b.push(cx, L.ledgeY, L.colD)
+      addRecordLedge(c, { length: L.colW - 0.09, lean: L.lean, sleeve: null })
+      c.b.pop()
+      const n = c.M.pools.pools.length
+      const bulb = addSconce(c, { x: cx, y: L.sconceY, z: L.colD, power: 1.1 })
+      pools[i] = c.M.pools.pools.length > n ? n : -1
+      bulbs[i] = bulb
+      const h = holders[i]
+      withPools(h.sleeve.material, c.M.pools, 'sleeve')
+      c.hooks.push(h.sleeve.mesh)
+      c.b.object(h.holder, new THREE.Matrix4().makeScale(0.315, 0.315, 0.315))
+    })
+
+    // bays 1, 2 and L: LP shelves over a mirror strip and spouted liquor steps
+    const lpBay = ([x0, x1]: [number, number], rows: number) => {
+      const cx = (x0 + x1) / 2
+      const mh = L.recY - 0.05 - L.cy - 0.03
+      box(c, c.M.mirror, x1 - x0 - 0.02, mh, 0.006, cx, L.cy + 0.03 + mh / 2, WZ + 0.003)
+      addBottleSteps(c, x0 + 0.02, x1 - 0.02, { y: L.cy, z: WZ + 0.008, tiers: 2, rise: 0.09, maxY: L.recY - 0.032 })
+      addRecordShelf(c, x0, x1, { y: L.recY, z: WZ, rows, top: true, sides: false })
+    }
+    lpBay(bay1, 2)
+    lpBay(bay2, 1)
+    lpBay(bayL, 2)
+    // bottles over the LPs (bay 1, bay L)
+    for (const [x0, x1] of [bay1, bayL]) {
+      const y = L.recY + 0.73
+      addBottleRow(c, x0 + 0.04, x1 - 0.04, { y, z: WZ + 0.16, slack: 0.05, spout: 0, maxH: L.ceil - 0.25 - y })
+    }
+    // bay 2: the 7" singles on the LP shelf's top board, a shelf of bottles over them
+    addRecordRow(c, { x0: bay2[0] + 0.004, x1: bay2[1] - 0.004, y: yS, zBack: WZ, depth: singlesDepth, singles: true })
+    const yCub = yS + 0.26
+    addShelf(c, bay2[1] - bay2[0], 0.34, { x: (bay2[0] + bay2[1]) / 2, y: yCub, z: WZ })
+    addBottleRow(c, bay2[0] + 0.05, bay2[1] - 0.05, { y: yCub, z: WZ + 0.16, slack: 0.05, spout: 0, maxH: 0.36 })
+    withPools(archie.sleeve.material, c.M.pools, 'sleeve')
+    c.hooks.push(archie.sleeve.mesh)
+    c.b.object(archie.holder, new THREE.Matrix4().makeScale(0.315, 0.315, 0.315))
+
+    // bay R: the exposed-brick accent panel with two walnut shelves; the stout's on the lower one
+    const bx = (bayR[0] + bayR[1]) / 2
+    addBrickPanel(c, L.brickW, brickH, { x: bx, y: L.brickY0, z: WZ, ...brick })
+    addShelf(c, L.brickW, 0.28, { x: bx, y: L.stoutY, z: WZ })
+    addShelf(c, L.brickW, 0.24, { x: bx, y: 1.66, z: WZ })
+    // (the stout stands alone on its stretch of shelf; bottles further along)
+    addBottleRow(c, bayR[0] + PINT_AT + 0.36, bayR[1] - 0.03, { y: L.stoutY, z: WZ + 0.1, slack: 0.02, spout: 0, maxH: 1.66 - 0.032 - L.stoutY })
+    addBottleRow(c, bayR[0] + 0.3, bayR[1] - 0.04, { y: 1.66, z: WZ + 0.1, slack: 0.02, spout: 0, maxH: L.brickY1 - 1.66 + 0.2 })
+    // beyond: more LPs
+    addRecordShelf(c, bayR[1] + 0.03, X1 - 0.1, { y: L.recY, z: WZ, rows: 2, top: true, sides: true })
+
+    // pendants over bays 1 and 2 (hung well in front of the wall, above the close shots)
+    const pn = c.M.pools.pools.length
+    addPendant(c, { x: (c0 + c1) / 2 + 0.05, y: L.ceil - 0.2, z: 1.2, drop: 0.66 })
+    addPendant(c, { x: (c1 + c2) / 2 - 0.05, y: L.ceil - 0.2, z: 1.2, drop: 0.74 })
+    // (they hang in front of the sleeves: kept low, so no cover band blooms)
+    for (let k = pn; k < c.M.pools.pools.length; k++) c.M.pools.pools[k].power *= 0.28
+    return { sleeves: [] }
+  })
+
+  // this run's sconce plates: aged, darker brass (they sit 12 cm from their own bulbs)
+  kit.materials.brass.color.set('#5e4228')
+  kit.materials.brass.roughness = 0.46
+
+  // ── pose every sleeve exactly (after build: parent = the kit group, metres) ──
+  // (posed on the sleeve's own bounds: the record lies inside the sleeve's
+  // thickness and above its foot, but its spun disc's bounding box would
+  // read as a corner below the foot)
+  const lean = (h: ReturnType<typeof makeHolder>, o: Parameters<typeof leanAgainst>[1]) => {
+    h.holder.remove(h.record.group)
+    const p = leanAgainst(h.holder, o)
+    h.holder.add(h.record.group)
+    return p
   }
-  return g
+  const gaps: number[] = []
+  holders.forEach((h, i) => {
+    const sx = L.cols[i] - L.sleeveOff
+    const p = lean(h, { wallZ: L.colD, floorY: L.ledgeY, x: sx, lean: L.lean, clearance: 0.012 })
+    gaps.push(p.gap)
+    // the foot must stand behind the ledge's lip (addRecordLedge: lip inner face)
+    const st = 0.014 * 0.315
+    const zp = 0.003 + 0.315 * Math.sin(L.lean) + (st / 2) * Math.cos(L.lean)
+    const lipIn = zp + (st / 2) * Math.cos(L.lean) + 0.003
+    if (p.foot > lipIn - 0.0005) console.warn(`[people] sleeve ${i}: foot ${p.foot.toFixed(4)} past the lip ${lipIn.toFixed(4)}`)
+  })
+  const ax = bay2[0] + 0.13
+  const pa = lean(archie, { wallZ: singlesFront, floorY: yS, x: ax, lean: 0.11, clearance: 0.012 })
+  gaps.push(pa.gap)
+
+  // the kit: world y = 0 at the ledges' top
+  kit.group.position.set(0, -L.ledgeY * MPW, 0)
+  kit.group.updateMatrixWorld(true)
+
+  const toDisplay = (h: ReturnType<typeof makeHolder>, pool: number, bulb: THREE.Vector3 | null, gap: number, out: number): Display => {
+    const k = h.size === 7 ? SEVEN : 1
+    const x0 = h.record.group.position.x
+    h.record.group.position.x = out * k
+    h.holder.updateMatrixWorld(true)
+    const bx = new THREE.Box3().setFromObject(h.holder, true)
+    h.record.group.position.x = x0
+    h.holder.updateMatrixWorld(true)
+    const b = bulb ? bulb.clone().applyMatrix4(kit.group.matrixWorld) : bx.getCenter(new THREE.Vector3())
+    return { holder: h.holder, sleeve: h.sleeve, record: h.record, size: h.size, box: bx, bulb: b, pool, gap }
+  }
+  const displays = holders.map((h, i) => toDisplay(h, pools[i], bulbs[i], gaps[i], OUT[1]))
+  const singleD = toDisplay(archie, -1, null, pa.gap, 0.44)
+
+  // clip audit: every sleeve's clearance to what it leans on (world units; > 0 is clear)
+  const wpl = new THREE.Plane()
+  const clear = (d: Display, zKit: number) => {
+    wpl.set(new THREE.Vector3(0, 0, 1), -(zKit * MPW))
+    // (a spun disc's box would stick out past the disc: measure it square)
+    const spin = d.record.disc.rotation.z
+    d.record.disc.rotation.z = 0
+    const g = planeClearance(d.holder, wpl) / MPW
+    d.record.disc.rotation.z = spin
+    d.holder.updateMatrixWorld(true)
+    return g
+  }
+  const audit = [...displays.map(d => clear(d, L.colD)), clear(singleD, singlesFront)]
+  if (audit.some(g => g < 0.002)) console.warn('[people] a sleeve is under 2 mm from its wall', audit)
+  if (new URLSearchParams(location.search).has('debug')) {
+    console.log('[people] sleeve clearances (mm):', audit.map(g => (g * 1000).toFixed(1)).join(' / '))
+    const rows: string[] = []
+    kit.group.traverse(o => {
+      const m = o as THREE.Mesh
+      if (!m.isMesh) return
+      const g = m.geometry
+      const n = ((g.index ? g.index.count : g.attributes.position.count) / 3) * ((m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).count : 1)
+      rows.push(`${(m.material as THREE.Material).type}:${Math.round(n)}${(m as THREE.InstancedMesh).isInstancedMesh ? 'x' + (m as THREE.InstancedMesh).count : ''}`)
+    })
+    console.log(`[people] kit draws ${kit.draws}: ${rows.join(' ')}`)
+  }
+
+  // the stout's spot on bay R's lower shelf
+  const pint = new THREE.Vector3(bayR[0] + PINT_AT, L.stoutY, L.WZ + 0.16).applyMatrix4(kit.group.matrixWorld)
+
+  const base = kit.materials.pools.pools.map(p => p.power)
+  return {
+    kit,
+    displays,
+    single: singleD,
+    pint,
+    setLamp(i, k) {
+      const d = displays[i]
+      if (!d || d.pool < 0) return
+      kit.materials.pools.pools[d.pool].power = base[d.pool] * k
+    },
+    dispose() {
+      kit.dispose()
+      for (const h of [...holders, archie]) {
+        h.sleeve.dispose()
+        ;(h.record.disc.material as THREE.Material).dispose()
+      }
+    },
+  }
 }

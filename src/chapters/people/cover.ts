@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { drawCover, loadCover, onFonts, type CoverSource, type CoverSpec } from '../../kit/vinyl'
+import { drawCover, loadCover, onFonts, scheme, type CoverSource, type CoverSpec } from '../../kit/vinyl'
 
 /*
  * A portrait ALBUM COVER, drawn in the kit's house style (drawCover: the
@@ -29,7 +29,12 @@ export interface PortraitCover {
   load(): void
 }
 
-export function portraitCover(spec: CoverSpec, url: string, res = 1024): PortraitCover {
+/**
+ * `foot`: the share of the cover hidden behind a display ledge's lip. The
+ * cream band (name, role, roundel) is drawn that much higher, over the foot
+ * of the photo, with plain band paper below it, so the name clears the steel.
+ */
+export function portraitCover(spec: CoverSpec, url: string, res = 1024, foot = 0): PortraitCover {
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = res
   const ctx = canvas.getContext('2d')!
@@ -40,7 +45,21 @@ export function portraitCover(spec: CoverSpec, url: string, res = 1024): Portrai
   let freed = false
   const draw = () => {
     if (freed) return
-    drawCover(ctx, 0, 0, res, { ...spec, photo: photo ?? stand })
+    const s = { ...spec, photo: photo ?? stand }
+    drawCover(ctx, 0, 0, res, s)
+    const lift = Math.round(res * foot)
+    if (lift > 0) {
+      // the band (drawCover's cream foot, 20.6% of the cover) again, `lift` higher
+      const top = Math.floor(res * (1 - 0.206)) - lift
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(0, top, res, res - lift - top)
+      ctx.clip()
+      drawCover(ctx, 0, -lift, res, s)
+      ctx.restore()
+      ctx.fillStyle = scheme(spec.paper ?? 'cream').paper
+      ctx.fillRect(0, res - lift, res, lift)
+    }
     texture.needsUpdate = true
   }
   draw()

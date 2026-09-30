@@ -6,7 +6,6 @@ import { clamp, lerp, smoothstep } from '../../core/math'
 import { el, rise, setRise } from '../../core/dom'
 import { nextFrame } from '../../core/yield'
 import { StoryClock } from '../../kit/pace'
-import { makeBarTop } from '../../kit/bar'
 import { BEERS, makeGlass, type Glass } from '../../kit/beer'
 import {
   CrateRig,
@@ -28,15 +27,22 @@ import {
   type Track,
 } from '../../kit/vinyl'
 import { GEL } from '../../world/World'
-import { makeFork, makePass, makePlate } from './props'
+import { makeFork, makePlate } from './props'
+import { makeKitchenRoom, type KitchenRoom } from './room'
 
 /*
- * KITCHEN — "The Pass" (the menu is the record crate).
+ * KITCHEN — "The Pass" (the menu is the record crate), in Glory's real room.
  *
- * Resonance's crate, set on Glory's pass: the long oiled bar top under a
- * stainless shelf with glowing heat-lamp tubes and a ticket rail. Every
- * section of the All Day Menu is a browser bin of 12" sleeves on the bar,
- * one station per section; the camera dollies along the pass from bin to bin.
+ * Resonance's crate, set on Glory's long oiled bar (black rubber rail along
+ * its back edge) with the back bar from Mike's photos behind it (room kit,
+ * see room.ts): walnut plank cladding and boxy clad columns with wire-cage
+ * sconces, the brick bay with the painted "Old 1837" over its bottle shelves,
+ * the records bay packed with LPs over the spouted liquor steps, ref4's
+ * record column (one Glory LP face-out on its steel ledge under a cage bulb)
+ * and the black wall with the tap chalkboards; pendants hang between the bins
+ * from the black ceiling. Every section of the All Day Menu is a browser bin
+ * of 12" sleeves on the bar, one station per section; the camera dollies
+ * along the bar from bin to bin, the back bar sliding past behind.
  * In each bin:
  *  - the SECTION SLEEVE (a typographic cover) lifts out, turns over to show
  *    its BACK — the section's tracklist, prices as values — while its record
@@ -50,12 +56,13 @@ import { makeFork, makePass, makePlate } from './props'
  * The readable menu is the DOM panel (paged to fit on phones); the caption
  * always names the sleeve in hand (or face-out in the riffle).
  *
- *   0.00–0.06  the pour lands; a wide look down the pass of bins
- *   0.058–0.12 "All Day Menu" holds; the camera settles on the Starters bin
+ *   0.00–0.06  the pour lands on a wide look along the back bar
+ *   0.058–0.12 "All Day Menu" holds over the Starters bin, "Old 1837" above it;
+ *              the camera dollies round the bin into the crate-digger view
  *   0.12–0.90  five sections, weighted by their sleeves (≈ 0.48 vh a sleeve)
- *   0.90–1.00  the camera pulls back along the whole pass (every bin played
- *              through, sleeves on their stacks); "Order for Pickup with
- *              ToastTab" + kitchen hours; then the pour (straw)
+ *   0.90–1.00  low on the Sweets bin (the last sweet face-out) under the
+ *              record column's face-out LP and its cage bulb; "Order for
+ *              Pickup with ToastTab" + kitchen hours; then the pour (straw)
  *
  * Camera, section, page, the rigs' item and riffle all run from a StoryClock.
  */
@@ -70,6 +77,10 @@ const END_ON = S1 + 0.008
 const PRE = 0.02
 const POST = 0.022
 const CRATE_YAW = -0.14
+/** camera pitches (degrees down): low enough that Glory's back bar reads behind every bin */
+const BIN_PITCH = 15
+const BIN_PITCH_TALL = 19
+const PRESENT_PITCH = 5
 /** where a held sleeve is presented (crate-local): low over the bin, in front of it */
 const PRESENT = new THREE.Vector3(0, 1.5, 0.98)
 const PAPERS: PaperName[] = ['red', 'stout', 'amber', 'cream', 'bone']
@@ -194,7 +205,7 @@ export default function kitchen(): Chapter {
   const bins: Bin[] = []
   const glasses: { g: Glass; station: number }[] = []
   let still: THREE.Group
-  let pass: ReturnType<typeof makePass>
+  let room: KitchenRoom
 
   // DOM
   let probe: HTMLElement
@@ -220,7 +231,7 @@ export default function kitchen(): Chapter {
     const cr = bins[i].crate.group
     cr.updateWorldMatrix(true, false)
     _c.set(0.05, 0.55, 0.2).applyMatrix4(cr.matrixWorld)
-    dirOf(tall ? 6 : 10, tall ? 30 : 27, _d)
+    dirOf(tall ? 6 : 10, tall ? BIN_PITCH_TALL : BIN_PITCH, _d)
     return frame(out, _c, _d, tall ? 1.9 : 2.2, 1.9, region, W, H, 30)
   }
   /** the held sleeve + its record, with the top of the bin under it */
@@ -228,7 +239,7 @@ export default function kitchen(): Chapter {
     const rig = bins[i].rig
     const sz = rig.station(0, _c, _d)
     _c.y -= 0.22
-    dirOf(tall ? 2 : 4, tall ? 18 : 16, _d)
+    dirOf(tall ? 2 : 4, tall ? PRESENT_PITCH + 2 : PRESENT_PITCH, _d)
     return frame(out, _c, _d, sz.w * (tall ? 1.1 : 1.2), sz.h + 0.75, region, W, H, 30)
   }
   function stationPose(i: number, qv: number, out: Pose) {
@@ -241,31 +252,66 @@ export default function kitchen(): Chapter {
     return blend(pa, pc, smoother(p), out)
   }
   /**
-   * The opening: a low product-film dolly past the front of the Starters bin
-   * (its section sleeve face-out, the dish covers standing behind it, the pass
-   * glowing beyond), rising into the crate-digger view by the first section.
+   * The opening, in Glory's room: under the pour a wide look along the back
+   * bar (walnut columns, sconces, the brick with "Old 1837", pendants, the
+   * black ceiling and duct), easing down onto the Starters bin — its section
+   * sleeve face-out in the foreground with "Old 1837" over it while the
+   * headline holds — then a dolly round the front of the bin into the
+   * crate-digger view by the first section.
    */
   function introPose(u: number, out: Pose) {
     const cr = bins[0].crate.group
     cr.updateWorldMatrix(true, false)
-    const e = smoother(u)
-    _c.set(lerp(0.25, 0.1, e), lerp(0.5, 0.55, e), 0.3).applyMatrix4(cr.matrixWorld)
-    dirOf(lerp(tall ? -30 : -36, tall ? 4 : 8, e), lerp(7, 22, e), _d)
-    return frame(out, _c, _d, tall ? 1.75 : lerp(2.3, 2.1, e), lerp(1.25, 1.6, e), region, W, H, 30)
+    // K0: the establishing wide (under the cut)
+    _c.set(tall ? 1.1 : 2.0, tall ? 2.6 : 3.3, -2.2).applyMatrix4(cr.matrixWorld)
+    dirOf(tall ? -10 : -14, tall ? 1 : -5, _d)
+    frame(pa, _c, _d, tall ? 5.6 : 8.2, tall ? 6 : 7.2, region, W, H, 36)
+    // K1: the bin with the brick over it, a slow push while the headline holds
+    const e = smoother(clamp(u / 0.46))
+    const p = smoother(clamp((u - 0.46) / 0.54))
+    if (tall) {
+      _c.set(0.55, lerp(1.75, 1.6, p), -0.8).applyMatrix4(cr.matrixWorld)
+      dirOf(lerp(-12, -8, p), lerp(3, 5, p), _d)
+      frame(pc, _c, _d, 2.9 * lerp(1, 0.94, p), 3.3 * lerp(1, 0.94, p), region, W, H, 32)
+    } else {
+      _c.set(0.8, lerp(2.05, 1.8, p), -0.6).applyMatrix4(cr.matrixWorld)
+      dirOf(lerp(-17, -12, p), lerp(-3, 0, p), _d)
+      const k = lerp(1, 0.92, p)
+      frame(pc, _c, _d, 3.6 * k, 4.1 * k, region, W, H, 32)
+    }
+    blend(pa, pc, e, out)
+    return keepAbove(out)
   }
   /**
-   * The ending: a close, lit shot of the Sweets bin (the last sweet standing
-   * face-out) with the dessert plate and the snifter, clear of the order card;
-   * a slow push in before the pour.
+   * The ending: low on the Sweets bin (the last sweet face-out) with the
+   * dessert plate and the snifter, and behind it ref4's walnut column — one
+   * Glory LP face-out on its steel ledge under a wire-cage bulb — clear of
+   * the order card; a slow push in before the pour.
    */
   function endPose(u: number, out: Pose) {
     const cr = bins[NSEC - 1].crate.group
     cr.updateWorldMatrix(true, false)
-    _c.set(0.12, 0.42, 0.5).applyMatrix4(cr.matrixWorld)
-    const push = smoother(clamp((u - 0.45) / 0.55))
-    dirOf(lerp(-10, -4, push), lerp(20, 17, push), _d)
-    const k = lerp(1, 0.86, push)
-    return frame(out, _c, _d, (tall ? 2.35 : 2.45) * k, 1.3 * k, region, W, H, 30)
+    const push = smoother(clamp((u - 0.35) / 0.65))
+    const k = lerp(1, 0.92, push)
+    if (tall) {
+      _c.set(0.4, lerp(1.45, 1.35, push), -1.1).applyMatrix4(cr.matrixWorld)
+      dirOf(lerp(-9, -6, push), lerp(7, 8, push), _d)
+      frame(out, _c, _d, 2.5 * k, 2.8 * k, region, W, H, 30)
+    } else {
+      _c.set(0.5, lerp(1.9, 1.8, push), -1.3).applyMatrix4(cr.matrixWorld)
+      dirOf(lerp(-9, -6, push), lerp(0.5, 1.5, push), _d)
+      frame(out, _c, _d, 3.0 * k, 3.95 * k, region, W, H, 30)
+    }
+    return keepAbove(out)
+  }
+  /** never let a framing drop the camera to the bar's edge (tall regions push it down): lift pose + aim together */
+  function keepAbove(out: Pose, minY = 0.75) {
+    if (out.pos.y < minY) {
+      const d = minY - out.pos.y
+      out.pos.y += d
+      out.tgt.y += d
+    }
+    return out
   }
   function computePose(qv: number, out: Pose) {
     if (qv < S0 + POST) {
@@ -273,7 +319,7 @@ export default function kitchen(): Chapter {
       introPose(u, pb)
       stationPose(0, qv, out)
       camStation = 0
-      return blend(pb, out, smoothstep(0.78, 1, u), out)
+      return blend(pb, out, smoothstep(0.74, 1, u), out)
     }
     if (qv > S1 - PRE) {
       stationPose(NSEC - 1, qv, pb)
@@ -301,7 +347,7 @@ export default function kitchen(): Chapter {
     const avail = dock.clientHeight
     if (avail <= 0) return
     const cs = getComputedStyle(panel)
-    const room = avail - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+    const space = avail - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
     for (const sd of secs) {
       const n = sd.items.length
       const was = sd.root.style.display
@@ -315,7 +361,7 @@ export default function kitchen(): Chapter {
         sd.pageEl.textContent = pages.length > 1 ? `1/${pages.length}` : ''
         for (const pg of pages) {
           sd.items.forEach((it, i) => (it.style.display = pg.includes(i) ? '' : 'none'))
-          if (sd.root.offsetHeight > room + 1) {
+          if (sd.root.offsetHeight > space + 1) {
             ok = false
             break
           }
@@ -373,12 +419,9 @@ export default function kitchen(): Chapter {
 
     async init(ctx: ChapterContext) {
       const phone = ctx.mobile
-      // ---- the room: the bar top and the pass
-      const bar = makeBarTop({ length: STEP * NSEC + 40, depth: 7 })
-      bar.position.set(stationX(2), 0, -0.6)
-      group.add(bar)
-      pass = makePass(-14, stationX(4) + 18, -2.6, 2.35, STEP)
-      group.add(pass.group)
+      // ---- the room: the long oiled bar, Glory's back bar behind it (room.ts)
+      room = await makeKitchenRoom({ mobile: phone, x0: -16, x1: stationX(4) + 22, backBarX: 1.5, columnX: 18.3, pendantX0: -6.6, pendantStep: STEP })
+      group.add(room.group)
       await nextFrame()
 
       // ---- a bin of sleeves per section
@@ -430,7 +473,7 @@ export default function kitchen(): Chapter {
           fillers: { count: p.rest.length, atlas },
           present: PRESENT,
           yaw: [4, -3, 5, -4],
-          pitch: 16,
+          pitch: PRESENT_PITCH,
         })
         bins.push({ crate, rig, secSleeve, backRead, backStack, turn: 0, item: -1, riffle: 0 })
       })
@@ -450,9 +493,10 @@ export default function kitchen(): Chapter {
       }
       still = new THREE.Group()
       const plate = makePlate(0.36)
-      const fork = makeFork(0.62)
-      fork.position.set(-0.3, 0.035, 0.1)
+      // the fork lies across the plate's well, clear of its rising rim (audited: its lowest point sits on the glaze)
+      const fork = makeFork(0.52)
       fork.rotation.y = 0.45
+      fork.position.set(-0.248 * Math.cos(0.45), 0.066, 0.248 * Math.sin(0.45))
       still.add(plate, fork)
       still.position.set(stationX(4) + 0.86, 0, 0.62)
       group.add(still)
@@ -531,7 +575,7 @@ export default function kitchen(): Chapter {
       const fade = 1 - 0.35 * smoothstep(0.95, 1, local)
       const w = ctx.world.params
       w.spot = 0.5 * fade
-      w.spotColor = '#ffc486'
+      w.spotColor = '#ffd6ae'
       w.spotPos.set(camX - 2.2, 7.5, 5.2)
       w.spotAt.set(camX, 0.6, 0.2)
       w.spotAngle = 0.5
@@ -543,17 +587,22 @@ export default function kitchen(): Chapter {
       w.rimBColor = GEL.tungsten
       w.rimBDir.set(1, 0.35, -1)
       w.fill = 0.26 * fade
-      w.brick = 0.5
-      w.bulbs = 0.7
-      w.cyc = 0.45
-      w.cycColor = '#6a3218'
+      // the room is built (kit/room): the backdrop only shows past its ends
+      w.top = '#070505'
+      w.bottom = '#050302'
+      w.room = 0
+      w.brick = 0
+      w.bulbs = 0
+      w.bokeh = 0
+      w.cyc = 0.12
+      w.cycColor = '#4a2616'
       w.cycX = tall ? 0 : -0.25
       w.cycY = 0.25
-      w.haze = 0.3
-      w.hazeColor = '#b0602a'
+      w.haze = 0.08
+      w.hazeColor = '#8a5028'
       w.envTurn = camX * 0.02
+      room.set(1.1 * (0.85 + 0.15 * fade), 1)
       syncVinylLights(ctx.world)
-      pass.setHeat(f.reducedMotion ? 1.1 : 1.1 + 0.08 * Math.sin(f.time * 1.3))
       ctx.post.params.beer = 0.2
 
       // ---- the bins

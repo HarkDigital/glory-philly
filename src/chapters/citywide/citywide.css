@@ -1,0 +1,224 @@
+/* CITY WIDE — every selector scoped under .cw-stage */
+
+/* the scrim behind the copy: left on wide screens, bottom on tall ones */
+.cw-stage .cw-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(9, 6, 4, 0.9) 0%,
+    rgba(9, 6, 4, 0.8) 24%,
+    rgba(9, 6, 4, 0.46) 38%,
+    rgba(9, 6, 4, 0.12) 50%,
+    rgba(9, 6, 4, 0) 58%
+  );
+}
+
+.cw-stage .cw-copy {
+  position: absolute;
+  left: var(--gutter);
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  width: clamp(300px, 33vw, 480px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 18px;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.cw-stage .cw-title {
+  font-size: clamp(2.5rem, 4.9vw, 4.9rem);
+  line-height: 0.96;
+  max-width: 8.5ch;
+}
+
+.cw-stage .cw-line {
+  margin: 2px 0 0;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: clamp(1.05rem, 1.34vw, 1.3rem);
+  line-height: 1.4;
+  color: var(--fg);
+  max-width: 30ch;
+  text-wrap: pretty;
+}
+
+/* the three: a clean list — the measure in tracked caps, the name in the sign's slab */
+.cw-stage .cw-items {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  width: 100%;
+  max-width: 400px;
+  counter-reset: none;
+}
+.cw-stage .cw-item {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  align-items: center;
+  padding: 11px 0 12px;
+  border-top: 1px solid var(--line);
+}
+.cw-stage .cw-item:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.cw-stage .cw-mark {
+  grid-row: 1 / span 2;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(243, 234, 216, 0.5);
+  box-sizing: border-box;
+  justify-self: center;
+  transition:
+    background-color 0.35s ease,
+    border-color 0.35s ease,
+    transform 0.35s ease;
+}
+.cw-stage .cw-detail {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  line-height: 1.3;
+}
+.cw-stage .cw-name {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.35rem, 1.75vw, 1.75rem);
+  line-height: 1.12;
+  color: var(--fg-muted);
+  transition: color 0.35s ease;
+}
+/* arrived: the mark fills with beer amber, the name comes up to full cream */
+.cw-stage .cw-item.is-on .cw-mark {
+  border-color: var(--amber-hot);
+  background-color: var(--amber-hot);
+  transform: scale(1.1);
+}
+.cw-stage .cw-item.is-on .cw-name {
+  color: var(--fg);
+}
+
+/* ── tall screens (phones, tablets upright): the product on top, the copy below ── */
+@media (orientation: portrait) {
+  .cw-stage .cw-scrim {
+    background: linear-gradient(
+      0deg,
+      rgba(9, 6, 4, 0.94) 0%,
+      rgba(9, 6, 4, 0.86) 36%,
+      rgba(9, 6, 4, 0.5) 50%,
+      rgba(9, 6, 4, 0.12) 60%,
+      rgba(9, 6, 4, 0) 68%
+    );
+  }
+  .cw-stage .cw-copy {
+    left: var(--gutter);
+    right: var(--gutter);
+    width: auto;
+    top: auto;
+    bottom: var(--safe-bottom);
+    justify-content: flex-end;
+    gap: 12px;
+  }
+  .cw-stage .cw-title {
+    font-size: clamp(2.1rem, 8.6vw, 3.6rem);
+    max-width: none;
+  }
+  .cw-stage .cw-line {
+    font-size: clamp(15px, 2.4vw, 1.2rem);
+    max-width: 34ch;
+  }
+  .cw-stage .cw-items {
+    margin-top: 2px;
+    max-width: 520px;
+  }
+  /* one line each: A CAN OF  Hamm's */
+  .cw-stage .cw-item {
+    grid-template-columns: 16px auto 1fr;
+    grid-template-rows: auto;
+    column-gap: 10px;
+    padding: 7px 0 8px;
+  }
+  .cw-stage .cw-mark {
+    grid-row: auto;
+    width: 10px;
+    height: 10px;
+  }
+  .cw-stage .cw-detail {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+  }
+  .cw-stage .cw-name {
+    font-size: clamp(1.1rem, 4.4vw, 1.5rem);
+  }
+}
+
+/* small phones (375 x 667): tighter still */
+@media (orientation: portrait) and (max-height: 700px) {
+  .cw-stage .cw-copy {
+    gap: 9px;
+  }
+  .cw-stage .cw-title {
+    font-size: clamp(1.9rem, 8vw, 2.4rem);
+  }
+  .cw-stage .cw-line {
+    font-size: 14.5px;
+    line-height: 1.38;
+  }
+  .cw-stage .cw-item {
+    padding: 5px 0 6px;
+  }
+  .cw-stage .cw-name {
+    font-size: 1.12rem;
+  }
+}
+
+/* ── short landscape (phones sideways, 200% zoom): compact column on the left ── */
+@media (orientation: landscape) and (max-height: 500px) {
+  .cw-stage .cw-scrim {
+    background: linear-gradient(90deg, rgba(9, 6, 4, 0.92) 0%, rgba(9, 6, 4, 0.82) 34%, rgba(9, 6, 4, 0.3) 48%, rgba(9, 6, 4, 0) 58%);
+  }
+  .cw-stage .cw-copy {
+    width: min(44vw, 380px);
+    gap: 8px;
+  }
+  .cw-stage .cw-title {
+    font-size: clamp(1.55rem, 4.2vw, 2.1rem);
+    max-width: none;
+  }
+  .cw-stage .cw-line {
+    font-size: 13.5px;
+    line-height: 1.35;
+    max-width: 36ch;
+  }
+  .cw-stage .cw-items {
+    margin-top: 0;
+  }
+  .cw-stage .cw-item {
+    grid-template-columns: 14px auto 1fr;
+    grid-template-rows: auto;
+    column-gap: 8px;
+    padding: 4px 0 5px;
+  }
+  .cw-stage .cw-mark {
+    grid-row: auto;
+    width: 9px;
+    height: 9px;
+  }
+  .cw-stage .cw-detail {
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+  }
+  .cw-stage .cw-name {
+    font-size: 1.02rem;
+  }
+}

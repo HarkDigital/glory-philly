@@ -1,5 +1,5 @@
-/* THE CREW (people): framed prints on the brick, a bio panel beside each.
-   Everything scoped under .pp-stage. */
+/* THE CREW (people): each person's sleeve face-out on a walnut column, a
+   liner-notes panel beside it. Everything scoped under .pp-stage. */
 
 .pp-stage .pp-safe {
   position: absolute;
@@ -19,7 +19,7 @@
   max-width: min(820px, 62vw);
   isolation: isolate;
 }
-/* a soft dark pool behind the words: the brick behind them stays readable */
+/* a soft dark pool behind the words: the lit wall behind them stays readable */
 .pp-stage .pp-head::before {
   content: '';
   position: absolute;
@@ -40,7 +40,7 @@
   line-height: 0.98;
 }
 
-/* ---- the bio panels (desktop: a column beside the print) ---- */
+/* ---- the bio panels (desktop: a column beside the sleeve) ---- */
 .pp-stage .pp-side {
   position: absolute;
   top: var(--safe-top);
@@ -171,7 +171,7 @@
   display: block;
 }
 
-/* ---- portrait screens: the print on top, the panel below ---- */
+/* ---- portrait screens: the sleeve on top, the panel below ---- */
 @media (max-aspect-ratio: 19/20) {
   .pp-stage .pp-side {
     left: var(--gutter);
@@ -286,7 +286,7 @@ html.motion-off .pp-stage .pp-card.is-paged .pp-pg {
   transform: none;
 }
 
-/* the prints hang close: an almost opaque panel so no face shows through the text */
+/* the sleeves stand close: an almost opaque panel so no face shows through the text */
 .pp-stage .pp-card.hud-panel {
   background: rgba(14, 9, 7, 0.985);
 }

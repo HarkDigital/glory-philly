@@ -54,10 +54,21 @@
 }
 
 .kt-intro {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   gap: 18px;
   align-self: center;
+}
+/* a soft stout scrim: the headline sits over the lit back bar / bar top (large text ≥ 3:1) */
+.kt-intro::before {
+  content: '';
+  position: absolute;
+  inset: -34px -48px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(10, 6, 4, 0.72), rgba(10, 6, 4, 0.5) 55%, rgba(10, 6, 4, 0));
 }
 .kt-title {
   font-size: clamp(2.6rem, 5.4vw, 5.6rem);

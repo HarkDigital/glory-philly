@@ -81,13 +81,14 @@
   margin-top: 6px;
 }
 
-/* the payoff: the motto returns with the CTAs (on the right: deck · glass · words) */
+/* the payoff: the motto returns with the CTAs, over the long bar on the left
+   (ref1's view again: words · deck · the full glass on its coaster) */
 .hero-stage .hero-payoff {
   position: absolute;
-  right: var(--gutter);
+  left: var(--gutter);
   top: var(--safe-top);
   bottom: var(--safe-bottom);
-  width: min(40vw, 580px);
+  width: min(42vw, 600px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -99,11 +100,11 @@
   content: '';
   position: absolute;
   z-index: -1;
-  right: calc(-1 * var(--gutter));
-  left: -16%;
-  top: -10%;
-  bottom: -10%;
-  background: radial-gradient(ellipse 70% 60% at 62% 50%, rgba(10, 6, 4, 0.74), rgba(10, 6, 4, 0.4) 60%, rgba(10, 6, 4, 0) 100%);
+  left: calc(-1 * var(--gutter));
+  right: -18%;
+  top: -12%;
+  bottom: -12%;
+  background: radial-gradient(ellipse 70% 60% at 30% 50%, rgba(10, 6, 4, 0.76), rgba(10, 6, 4, 0.44) 60%, rgba(10, 6, 4, 0) 100%);
   pointer-events: none;
 }
 .hero-stage .hero-motto {

@@ -7,6 +7,7 @@ import {
   addChalkboard,
   addCooler,
   addDuct,
+  addDuctTrunk,
   addGlassRows,
   addHifi,
   addPendant,
@@ -32,7 +33,8 @@ import { old1837, type ChalkSpec, type PaintLine } from './textures'
  * ledge, tiered liquor with chrome pour spouts over a mirror strip, glassware,
  * glowing glass-door coolers, a hi-fi with a blue ring (a kit/vinyl turntable
  * sits on it), wire-cage Edison sconces and pendants, the black ceiling with
- * silver flex duct, tall chalkboards, the long oiled bar with its rubber rail.
+ * long galvanized trunk duct tight under it (or round silver flex), tall
+ * chalkboards, the long oiled bar with its rubber rail.
  * See it: ?lab=room&view=backbar|column|brick|ceiling|all
  *
  * UNITS: METRES (y up, floor y = 0; the back wall is the plane z = 0, the room
@@ -49,6 +51,17 @@ import { old1837, type ChalkSpec, type PaintLine } from './textures'
  *   dispose     frees the kit's own geometry/materials (shared/cached maps stay)
  * Common options (KitOpts): scale, seed, glow, ambient (default 0.3), mobile,
  * lights (0|1|2 real point lights; default 0 — the pools light the kit).
+ *
+ * WALNUT: one warm walnut family — long boards (10–16 cm wide, 1–2.3 m between
+ * butt joints; the map is 1.2 m across × 2.4 m along the boards), board tones
+ * within ±~10 % with the odd darker reclaimed board, soft figure, tight joints.
+ *
+ * TONE: the kit's own opaque materials pre-cancel PBR Neutral's toe (it
+ * crushes dim warm tones to orange by subtracting the smallest channel), so
+ * walnut, brick and LP spines keep the photos' brown in the shadows. Give
+ * your own pooled materials the same with kitPools(mat, pools, key) or
+ * withPools(mat, pools, key, undefined, { untoe: true }); plain withPools()
+ * is unchanged.
  *
  * INIT: the maps are procedural (walnut 1024², the LP atlas, painted brick…),
  * built once per page. Call `await prepareRoom({ backBar: {} })` first in an
@@ -88,8 +101,11 @@ import { old1837, type ChalkSpec, type PaintLine } from './textures'
  *  makeRecordColumn({ cover, lean, columnWidth, records, singles, bottles, hifi, turntable, sconce })
  *     ref4 (x ∈ [−1.5, 1.6], a 0.42 m column). anchors: ledge, ledgeTop, sconce, records,
  *     singles, bottles, turntable, receiver, stack, counter, column
- *  makeCeiling({ width, depth, height, ducts: [{ pts, radius }], pendants: [{ x, z, drop }], beams })
- *     anchors: pendant0.., duct0.., centre
+ *  makeCeiling({ width, depth, height, ducts: [{ pts, shape, size, radius }], pendants: [{ x, z, drop }], beams })
+ *     ducts: shape 'rect' (ref1; the default without a radius): a long straight
+ *     galvanized trunk along the pts' xz, its top 3 cm under the joists, flanges +
+ *     black straps + a conduit; 'flex' (the default WITH a radius): round silver
+ *     flex through the pts. anchors: pendant0.., duct0.., centre
  *  makeBarRun({ length, depth, height, mat, front })  the long oiled bar + rubber rail
  *     anchors: top, edge, rail
  *  makeChalkboards({ boards: ChalkSpec[] })  default = tapBoards(): the real tap
@@ -107,7 +123,7 @@ import { old1837, type ChalkSpec, type PaintLine } from './textures'
  *  cooler({ width, doors })                      glass-door back-bar cooler
  *  hifiStack({ turntable })                      receiver + amp (+ a black deck)
  *  sconce() · pendant({ drop })                  wire-cage Edison fixtures
- *  ductRun(length, { radius })                   silver flex duct with straps
+ *  ductRun(length, { radius, shape: 'rect', size })  silver flex (default) or the galvanized trunk
  *  chalkboard(w, h, spec)                        one framed board
  *  tv({ on })                                    dark glass; 'on' = a dim abstract pitch
  *
@@ -139,9 +155,9 @@ import { old1837, type ChalkSpec, type PaintLine } from './textures'
 
 export { makeBackBar, makeRecordColumn, makeCeiling, makeBarRun, makeChalkboards, tapBoards, houseCover, assemble, prepareRoom } from './compose'
 export type { RoomKit, KitOpts, BackBarOpts, RecordColumnOpts, CeilingOpts, BarRunOpts, ChalkWallOpts } from './compose'
-export { old1837, walnutMaps, walnutMapsAsync, brickCanvas, brickPanelMaps, brickPanelMapsAsync, spineAtlas, WALNUT_TILE } from './textures'
+export { old1837, walnutMaps, walnutMapsAsync, brickCanvas, brickPanelMaps, brickPanelMapsAsync, spineAtlas, galvMaps, WALNUT_TILE, WALNUT_ALONG } from './textures'
 export type { PaintLine, ChalkSpec, PbrMaps } from './textures'
-export { PoolSet, withPools, MAX_POOLS } from './materials'
+export { PoolSet, withPools, kitPools, MAX_POOLS } from './materials'
 export { leanOnWall } from './pieces'
 export type { LeanPose } from './pieces'
 export type { RoomMaterials } from './materials'
@@ -250,9 +266,19 @@ export function pendant(o: KitOpts & { drop?: number; power?: number } = {}): Ro
   })
 }
 
-/** a straight run of silver flex duct along x (centred), hung from ceilingY if given */
-export function ductRun(length = 4, o: KitOpts & { radius?: number; ceilingY?: number } = {}): RoomKit {
+/**
+ * A straight run along x (centred) of silver flex duct (default), hung from
+ * ceilingY if given — or, with shape 'rect', ref1's galvanized trunk (size
+ * [width, height], default [0.6, 0.32]; its top 3 cm under ceilingY, else
+ * centred on y = 0) with flanges, straps and a conduit.
+ */
+export function ductRun(length = 4, o: KitOpts & { radius?: number; ceilingY?: number; shape?: 'flex' | 'rect'; size?: [number, number] } = {}): RoomKit {
   return assemble(o, c => {
+    if (o.shape === 'rect') {
+      const [width, height] = o.size ?? [0.6, 0.32]
+      addDuctTrunk(c, [new THREE.Vector3(-length / 2, 0, 0), new THREE.Vector3(length / 2, 0, 0)], { width, height, ceilingY: o.ceilingY ?? null })
+      return
+    }
     addDuct(c, [new THREE.Vector3(-length / 2, 0, 0), new THREE.Vector3(0, -0.02, 0.03), new THREE.Vector3(length / 2, 0, 0)], {
       radius: o.radius ?? 0.22,
       ceilingY: o.ceilingY ?? null,

@@ -146,9 +146,18 @@ export function scaleUv(g: THREE.BufferGeometry, su: number, sv: number, ou = 0,
 }
 
 /**
+ * The walnut map is stretched 2 : 1 — one tile covers `tile` metres ACROSS
+ * the boards and `tile × PLANK_STRETCH` ALONG them — so boards run long (1–2.3
+ * m between butt joints at the default 1.2 m tile, as on the real walls) and
+ * the grain repeats half as often, at the same 1024² cost.
+ */
+export const PLANK_STRETCH = 2
+
+/**
  * A box whose UVs are in METRES of the face (so a plank texture tiles at real
  * scale on every face), base on y = 0 when `base`. `tile` = metres per texture
- * repeat. `vertical`: the grain runs up the ±z/±x faces (vertical boards).
+ * repeat across the boards (× PLANK_STRETCH along them). `vertical`: the grain
+ * runs up the ±z/±x faces (vertical boards).
  */
 export function plankBox(w: number, h: number, d: number, { tile = 1.2, vertical = false, ou = 0, ov = 0, base = false } = {}) {
   const g = new THREE.BoxGeometry(w, h, d)
@@ -175,8 +184,9 @@ export function plankBox(w: number, h: number, d: number, { tile = 1.2, vertical
       a = x
       b = y
     }
-    if (vertical && ny < 0.5) uv.setXY(i, b / tile + ou, a / tile + ov)
-    else uv.setXY(i, a / tile + ou, b / tile + ov)
+    const along = tile * PLANK_STRETCH
+    if (vertical && ny < 0.5) uv.setXY(i, b / along + ou, a / tile + ov)
+    else uv.setXY(i, a / along + ou, b / tile + ov)
   }
   return g
 }
@@ -292,7 +302,13 @@ export class RoomBuilder {
   /** add a ready-made object (a vinyl sleeve, a light…) posed by the current frame × local */
   object(o: THREE.Object3D, local?: THREE.Matrix4) {
     const m = this.m.clone()
+    // no explicit local pose: keep the object's own position/rotation/scale
+    // (build() decomposes into them, so they'd be lost otherwise)
     if (local) m.multiply(local)
+    else {
+      o.updateMatrix()
+      m.multiply(o.matrix)
+    }
     this.objects.push({ o, m })
     return o
   }

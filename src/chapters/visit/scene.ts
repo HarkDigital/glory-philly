@@ -1,66 +1,221 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { makeBrickWall } from '../../kit/bar'
+import { WALNUT_TILE, assemble, brickPanelMapsAsync, prepareRoom, walnutMaps, type RoomKit } from '../../kit/room'
+import { addBrickPanel, addDuct, addPendant, addPlankColumn, addPlankWall, addRecordRow, addSconce, box, type Ctx } from '../../kit/room/pieces'
 
 /*
- * LAST CALL — the set: the front of the house at night, seen from inside.
+ * LAST CALL — the set: the front of the house at night, seen from inside,
+ * built from the room kit (src/kit/room) so it is the same bar as the rest
+ * of the site (Mike's photos: ref5 for the sign + window, ref1/ref4 for the
+ * walnut, the columns, the cage bulbs, the ceiling):
  *
- *   - the brick front wall (running bond, world-anchored so the pieces line
- *     up) with a tall window opening cut into it,
- *   - the painted wall sign on the brick beside the window (drawn in Alfa
- *     Slab One on a canvas, whitewash that sinks into the mortar and wears
- *     off in places — the photo is too skewed to use as a texture),
+ *   - the exposed brick bay with the painted wall sign (ref5 — this wall is
+ *     real): old Philadelphia brick from the kit, the sign drawn in Alfa Slab
+ *     One on a canvas over it, whitewash sinking into the mortar courses,
+ *   - reclaimed-walnut cladding: a boxy clad column either side of the brick
+ *     (the right one stands against the window) with a wire-cage Edison
+ *     sconce on each, walnut planks right of the window and under the sill,
+ *   - the black ceiling with its joists, silver flex duct and a cage pendant,
+ *     a black-painted header over the window,
+ *   - a low ebonised record console under the sign, its open front packed
+ *     with LPs (the walnut deck sits on it),
  *   - Glory's tall black-framed window (two sashes of small panes and a
  *     transom), with a glass that only adds reflections,
  *   - and outside: Chestnut Street out of focus (a shader, not a photo):
  *     warm brick facades lit by lanterns and a shop window, wet cobbles with
  *     long reflections, and now and then a car's lights sliding past.
  *
- * World units: the window opening spans x 0.7..4.3, y 0.9..7.7; the wall
- * is the plane z = 0 facing +z; the sill top is y = 0.9.
+ * World units: the wall is the plane z = 0 facing +z; the sill top is
+ * y = 0.9. The room kit works in metres: ROOM_S world units per metre, set
+ * so the kit's brick course (66.7 mm) is exactly one COURSE — the sign's
+ * wear lines sit on its mortar.
  */
 
-export const WIN = { x0: 0.7, x1: 4.3, y0: 0.9, y1: 7.7, depth: 0.34 }
+/** brick: one course (8 per 1.3) — the sign sits on course lines */
+export const COURSE = 1.3 / 8
+/** room-kit scale: world units per metre (the kit's 66.7 mm brick course = one COURSE) */
+export const ROOM_S = COURSE / 0.0667
+/** the window opening (black frames, right of the clad column) */
+export const WIN = { x0: 0.95, x1: 4.3, y0: 0.9, y1: 7.7, depth: 0.34 }
 /** the plane the street is painted on */
 export const STREET_Z = -9
 /** the floor of the room */
 export const FLOOR = -2.2
-/** brick tile size (8 courses per tile) and one course */
-const TILE = 1.3
-export const COURSE = TILE / 8
-export const SIGN = { x0: -3.05, x1: 0.25, y0: COURSE * 21, y1: COURSE * 31 }
+/** the black ceiling (on a course line) */
+export const CEIL = COURSE * 54
+/** the clad columns either side of the brick bay (x spans); the right one stands against the window */
+export const COL_A = { x0: -5.6, x1: -4.65 }
+export const COL_B = { x0: 0.05, x1: WIN.x0 }
+/** columns: 0.36 m deep off 2 cm of cladding */
+export const COL_D = (0.02 + 0.36) * ROOM_S
+/** the brick's face (the kit's panel sits 3 mm proud of the wall plane) */
+export const BRICK_Z = 0.003 * ROOM_S
+export const SIGN = { x0: -3.45, x1: -0.15, y0: COURSE * 21, y1: COURSE * 31 }
+/** the record console under the sign, between the columns: x span, depth off the wall, top height (= the sill) */
+export const CONSOLE = { x0: COL_A.x1 + 0.02, x1: COL_B.x0 - 0.02, depth: 2.85, top: WIN.y0, thick: 0.12 }
 
-/** A brick piece whose courses line up with every other piece (texture offset = world position). */
-function brickPiece(x0: number, x1: number, y0: number, y1: number): THREE.Mesh {
-  const w = x1 - x0
-  const h = y1 - y0
-  const m = makeBrickWall(w, h)
-  const mat = m.material as THREE.MeshStandardMaterial
-  mat.map!.repeat.set(w / TILE, h / TILE)
-  mat.map!.offset.set(x0 / TILE, y0 / TILE)
-  mat.color.set('#8c7468')
-  m.position.set(x0 + w / 2, y0 + h / 2, 0)
-  return m
+/** the duct's centre line (world y) */
+const DUCT_Y = 6.85
+/** the cage fixtures' size over life size (they sit beside a hero-scale deck and pint) */
+const FIX = 1.6
+
+/** world → room-kit metres */
+const M = (v: number) => v / ROOM_S
+
+/** the two brick panels of the bay (stacked on a course line, so the seam is a mortar joint) */
+const BRICK_PANELS = [
+  // lower: under the console top up to just over the sign; upper: to the ceiling (an even course count keeps the bond)
+  { y0: COURSE * 4, y1: COURSE * 32, seed: 21 },
+  { y0: COURSE * 32, y1: CEIL, seed: 22 },
+]
+const BRICK_SOOT = 0.3
+const brickW = () => M(COL_B.x0 - COL_A.x1)
+
+/** Build the kit's maps + this chapter's brick panels across frames (call first in init). */
+export async function prepareVisitRoom() {
+  await prepareRoom()
+  for (const p of BRICK_PANELS) await brickPanelMapsAsync(brickW(), M(p.y1 - p.y0), { lines: [], seed: p.seed, soot: BRICK_SOOT })
 }
 
-export function makeWall(): THREE.Group {
-  const g = new THREE.Group()
-  const { x0, x1, y0, y1 } = WIN
-  g.add(brickPiece(-10, x0, FLOOR, 12), brickPiece(x1, 11, FLOOR, 12), brickPiece(x0, x1, y1, 12), brickPiece(x0, x1, FLOOR, y0 - 0.14))
-  // a black-painted skirting board and the old floorboards, dark
-  const skirt = new THREE.Mesh(new THREE.BoxGeometry(21, 0.34, 0.05), new THREE.MeshStandardMaterial({ color: '#0f0c0b', roughness: 0.5 }))
-  skirt.position.set(0.5, FLOOR + 0.17, 0.025)
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 30), new THREE.MeshStandardMaterial({ color: '#050302', roughness: 1, envMapIntensity: 0.2 }))
-  floor.rotation.x = -Math.PI / 2
-  floor.position.set(0.5, FLOOR, 15)
+export interface VisitRoom {
+  kit: RoomKit
+  /** world position of each bulb (sconce A, sconce B, the pendant) */
+  bulbs: THREE.Vector3[]
+}
+
+/**
+ * The room as ONE room kit (merged per material, instanced LPs, the bulbs'
+ * light pools shared by everything in it). Metres inside; the group sits at
+ * the world origin scaled by ROOM_S.
+ */
+export function makeRoom({ mobile = false } = {}): VisitRoom {
+  const fl = M(FLOOR)
+  const ce = M(CEIL)
+  const H = ce - fl
+  const wz = 0.02 // the cladding's face
+  const colD = 0.36
+  const kit = assemble({ scale: ROOM_S, seed: 17, mobile, ambient: 0.3 }, c => {
+    const A = c.anchors
+    const bulbs: THREE.Vector3[] = []
+    // ── walnut: the wall left of column A, right of the window, under the sill
+    const L0 = M(-16)
+    const R1 = M(18)
+    addPlankWall(c, M(COL_A.x0) - L0, H, { x: (L0 + M(COL_A.x0)) / 2, y: fl, depth: wz })
+    addPlankWall(c, R1 - M(WIN.x1), H, { x: (R1 + M(WIN.x1)) / 2, y: fl, depth: wz })
+    addPlankWall(c, M(WIN.x1 - WIN.x0), M(WIN.y0 - 0.14) - fl, { x: M((WIN.x0 + WIN.x1) / 2), y: fl, depth: wz, dir: 'v' })
+    // ── the black-painted header over the window, up to the ceiling
+    box(c, c.M.ceiling, M(WIN.x1 - WIN.x0), ce - M(WIN.y1), wz, M((WIN.x0 + WIN.x1) / 2), (M(WIN.y1) + ce) / 2, wz / 2)
+    // ── the clad columns, floor to ceiling (their sides run back to the wall plane, so
+    // the brick and the window reveal butt them with no gap)
+    for (const k of [COL_A, COL_B]) addPlankColumn(c, M(k.x1 - k.x0), colD + wz, H, { x: M((k.x0 + k.x1) / 2), y: fl, z: 0 })
+    // ── the exposed brick bay (the sign is painted over it as its own layer)
+    const bw = brickW()
+    const bx = M((COL_A.x1 + COL_B.x0) / 2)
+    for (const p of BRICK_PANELS) addBrickPanel(c, bw, M(p.y1 - p.y0), { x: bx, y: M(p.y0), z: 0, seed: p.seed, soot: BRICK_SOOT })
+    // behind the console (never really seen): dark paint down to the floor
+    box(c, c.M.ceiling, bw, M(BRICK_PANELS[0].y0) - fl, 0.004, bx, (fl + M(BRICK_PANELS[0].y0)) / 2, 0.002)
+    // ── the record console: ebonised, an open front packed with LPs
+    addRecordConsole(c)
+    // ── cage sconces on the columns (ref1: on the column faces). The fixtures
+    // are FIX × life size, so they hold their own beside the hero-scale deck
+    // and pint (the pools stay in real metres)
+    const fixture = (x: number, y: number, z: number, add: () => THREE.Vector3) => {
+      c.b.push(x, y, z, 0, 0, 0, FIX)
+      const v = add()
+      c.b.pop()
+      return v
+    }
+    const sy = M(3.95)
+    A.sconceA = fixture(M((COL_A.x0 + COL_A.x1) / 2), sy, wz + colD, () => addSconce(c, {}))
+    A.sconceB = fixture(M((COL_B.x0 + COL_B.x1) / 2), sy, wz + colD, () => addSconce(c, {}))
+    bulbs.push(A.sconceA.clone(), A.sconceB.clone())
+    // ── the black ceiling: joists, a run of silver flex duct, a cage pendant
+    const cd = M(9)
+    box(c, c.M.ceiling, R1 - L0, 0.03, cd, (L0 + R1) / 2, ce + 0.015, cd / 2)
+    for (let x = L0 + 0.5; x < R1; x += 1.2) box(c, c.M.ceiling, 0.1, 0.2, cd, x, ce - 0.1, cd / 2)
+    // the duct runs along the front of the room, strapped and hung on rods,
+    // low enough that the rest frame catches its underside (ref1/ref6)
+    const dr = 0.24
+    const dy = M(DUCT_Y)
+    addDuct(c, [new THREE.Vector3(L0, dy + 0.02, 0.98), new THREE.Vector3(M(0.5), dy - 0.02, 0.95), new THREE.Vector3(R1, dy + 0.03, 0.9)], { radius: dr, ceilingY: ce })
+    A.duct = new THREE.Vector3(M(0.5), dy, 0.95)
+    // hung in the window bay, behind the duct (its cord clears it)
+    const px = M(3.35)
+    const pz = 0.34
+    const bulbY = M(5.75)
+    A.pendant = fixture(px, ce, pz, () => addPendant(c, { drop: (ce - bulbY) / FIX - 0.16 }))
+    bulbs.push(A.pendant.clone())
+    return { bulbs }
+  })
+  const bulbs = ['sconceA', 'sconceB', 'pendant'].map(n => kit.anchors[n].clone().multiplyScalar(ROOM_S))
+  return { kit, bulbs }
+}
+
+/**
+ * The console under the sign (kit metres): ebonised carcass between the
+ * columns, a recessed plinth, three rows of open cubbies across the front
+ * (two dividers) packed with LPs by the kit's no-clip record rows; the
+ * oiled top is the chapter's own (a kit/bar plank top, CONSOLE.thick).
+ */
+function addRecordConsole(c: Ctx) {
+  const x0 = M(CONSOLE.x0)
+  const x1 = M(CONSOLE.x1)
+  const zf = M(CONSOLE.depth) - 0.012
+  const fl = M(FLOOR)
+  const top = M(CONSOLE.top - CONSOLE.thick)
+  const cx = (x0 + x1) / 2
+  const w = x1 - x0
+  const plinth = 0.07
+  const t = 0.022
+  const cub = 0.36
+  const mat = c.M.counter
+  // plinth (recessed toe kick), the solid carcass behind the cubbies, the sides
+  box(c, mat, w - 0.02, plinth, zf - 0.03, cx, fl + plinth / 2, (zf - 0.03) / 2)
+  const zb = zf - cub
+  box(c, mat, w, top - fl - plinth, zb - 0.02, cx, (top + fl + plinth) / 2, 0.02 + (zb - 0.02) / 2)
+  for (const s of [-1, 1]) box(c, mat, t, top - fl - plinth, zf, cx + s * (w / 2 - t / 2), (top + fl + plinth) / 2, zf / 2)
+  // shelves: the bottom board, two between the rows; a rail under the top
+  const y0 = fl + plinth
+  const pitch = (top - 0.03 - y0 - t) / 3
+  for (let r = 0; r < 3; r++) box(c, mat, w - 2 * t, t, cub, cx, y0 + r * pitch + t / 2, zb + cub / 2)
+  box(c, mat, w - 2 * t, 0.03, 0.03, cx, top - 0.015, zf - 0.015)
+  // dividers every ~0.5 m
+  const bays = Math.max(2, Math.round((w - 2 * t) / 0.5))
+  const bayW = (w - 2 * t - (bays - 1) * t) / bays
+  for (let b = 1; b < bays; b++) box(c, mat, t, top - y0, cub, x0 + t + b * bayW + (b - 0.5) * t, (top + y0) / 2, zb + cub / 2)
+  // LPs, spines out (fills vary so the rows don't read as one block)
+  const fills = [0.96, 0.9, 1, 0.82, 1, 0.94, 0.88, 1, 0.9, 0.97, 0.85, 1]
+  for (let r = 0; r < 3; r++)
+    for (let b = 0; b < bays; b++) {
+      const bx0 = x0 + t + b * (bayW + t)
+      addRecordRow(c, { x0: bx0, x1: bx0 + bayW, y: y0 + r * pitch + t, zBack: zb, depth: cub - 0.012, fill: fills[(r * bays + b) % fills.length] })
+    }
+}
+
+/**
+ * The floorboards: dark oiled planks (the kit's walnut maps, dimmer than the
+ * walls), one-sided — on phones the straight-on camera sits below floor
+ * level, looking past it. Only glimpsed beside the card on tall screens.
+ */
+export function makeFloor(): THREE.Mesh {
+  const wm = walnutMaps()
+  const w = 40
+  const d = 34
+  const geo = new THREE.PlaneGeometry(w, d)
+  geo.rotateX(-Math.PI / 2)
+  // UVs in metres: boards run along x (the map spans WALNUT_TILE across the boards, twice that along them)
+  const uv = geo.attributes.uv as THREE.BufferAttribute
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * w) / ROOM_S / (WALNUT_TILE * 2), (uv.getY(i) * d) / ROOM_S / WALNUT_TILE)
+  const mat = new THREE.MeshStandardMaterial({ map: wm.map, roughnessMap: wm.data, color: '#4b403a', roughness: 0.8, envMapIntensity: 0.2 })
+  const floor = new THREE.Mesh(geo, mat)
+  floor.position.set(0.5, FLOOR, d / 2)
   floor.receiveShadow = true
-  g.add(skirt, floor)
-  return g
+  return floor
 }
 
 // ─── the window ─────────────────────────────────────────────────────────────
 
-export function makeWindow(): { group: THREE.Group; frameMat: THREE.MeshStandardMaterial; glassMat: THREE.MeshStandardMaterial } {
+export function makeWindow(): { group: THREE.Group; frame: THREE.Mesh; frameMat: THREE.MeshStandardMaterial; glassMat: THREE.MeshStandardMaterial } {
   const { x0, x1, y0, y1, depth } = WIN
   const group = new THREE.Group()
   const geos: THREE.BufferGeometry[] = []
@@ -124,7 +279,7 @@ export function makeWindow(): { group: THREE.Group; frameMat: THREE.MeshStandard
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0 - 0.1, y1 - y0 - 0.1), glassMat)
   glass.position.set(xm, (y0 + y1) / 2, zf - 0.02)
   group.add(glass)
-  return { group, frameMat, glassMat }
+  return { group, frame, frameMat, glassMat }
 }
 
 // ─── the street outside (out of focus) ──────────────────────────────────────
@@ -418,10 +573,12 @@ export function makeSign(): { mesh: THREE.Mesh; tex: THREE.CanvasTexture; canvas
     depthWrite: false,
     polygonOffset: true,
     polygonOffsetFactor: -2,
-    color: '#f4ecdd',
+    // the whitewash's albedo: it takes the sconces' pools as well as the key,
+    // so it's darker than paper (a flat 0.9 blooms)
+    color: '#bdb8ae',
   })
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, y1 - y0), mat)
-  mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, 0.004)
+  mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, BRICK_Z + 0.004)
   mesh.receiveShadow = true
   return { mesh, tex, canvas }
 }
@@ -510,24 +667,9 @@ export function makeVotive(): { group: THREE.Group; flame: THREE.Sprite; flameMa
   return { group, flame, flameMat, jarMat }
 }
 
-// ─── the console the deck stands on ─────────────────────────────────────────
+// ─── the console's oiled top ────────────────────────────────────────────────
 
-/** A low black console against the brick: oiled plank top at y = top, body down to the floor. */
-export function makeConsole(x0: number, x1: number, depth: number, top: number, topMesh: THREE.Mesh): THREE.Group {
-  const g = new THREE.Group()
-  const w = x1 - x0
-  const h = top - 0.12 - FLOOR
-  const bodyMat = new THREE.MeshStandardMaterial({ color: '#100c0a', roughness: 0.5, envMapIntensity: 0.6 })
-  const body = new THREE.Mesh(new THREE.BoxGeometry(w - 0.1, h, depth - 0.12), bodyMat)
-  body.position.set((x0 + x1) / 2, FLOOR + h / 2, depth / 2 - 0.02)
-  body.receiveShadow = true
-  // two doors: a hairline shadow gap between them and a thin reveal under the top
-  const gapMat = new THREE.MeshBasicMaterial({ color: '#030202' })
-  const gap = new THREE.Mesh(new THREE.PlaneGeometry(0.018, h - 0.2), gapMat)
-  gap.position.set((x0 + x1) / 2, FLOOR + h / 2, depth - 0.079)
-  const reveal = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.1, 0.02), gapMat)
-  reveal.position.set((x0 + x1) / 2, top - 0.2, depth - 0.079)
-  topMesh.position.set((x0 + x1) / 2, top, depth / 2)
-  g.add(body, gap, reveal, topMesh)
-  return g
+/** Place the console's top (a kit/bar plank top, CONSOLE.thick) between the columns. */
+export function placeConsoleTop(topMesh: THREE.Mesh) {
+  topMesh.position.set((CONSOLE.x0 + CONSOLE.x1) / 2, CONSOLE.top, CONSOLE.depth / 2)
 }

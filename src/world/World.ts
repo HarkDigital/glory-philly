@@ -10,7 +10,7 @@ import type { Frame } from '../core/types'
  *    soft STUDIO POOL of light behind the subject (cyc/cycColor/cycX/cycY: the
  *    product-shot sweep), GLORY'S ROOM out of focus (room/walnutColor/
  *    ceilingColor: the real bar from Mike's photos — a BLACK CEILING with
- *    silver flex duct, reclaimed-walnut walls with boxy clad columns and a
+ *    long galvanized trunk ducts, reclaimed-walnut walls with boxy clad columns and a
  *    warm sconce pool on each), an out-of-focus BRICK accent (world-anchored
  *    running bond with dark mortar: panels between the columns while `room`
  *    is up, the whole wall when it's 0), a low band of HAZE, wire-cage EDISON
@@ -175,6 +175,14 @@ const FRAG = /* glsl */ `
     f = f * f * (3.0 - 2.0 * f);
     return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
   }
+  // PBR Neutral pre-cancel (as in the room kit): lift by the toe's inverse offset
+  // so the out-of-focus walnut keeps its brown instead of crushing to orange
+  vec3 untoe(vec3 c, float k) {
+    c = max(c, vec3(0.0));
+    float m = min(c.r, min(c.g, c.b));
+    float l = m < 0.04 ? 0.4 * sqrt(m) - m : 0.04;
+    return c + l * k;
+  }
   float smoke(vec2 p) {
     float t = uTime * 0.035;
     float n = noise(p * 1.3 + vec2(t, -t * 0.6)) * 0.55;
@@ -196,7 +204,7 @@ const FRAG = /* glsl */ `
     // GLORY'S ROOM (out of focus, direction-anchored): a walnut-clad wall on a
     // cylinder around the camera — boxy columns with wide vertical boards and a
     // warm sconce pool, horizontal planks between — under a black ceiling with
-    // silver flex duct. Metres on the wall: x along it, y above the eye.
+    // galvanized trunk duct. Metres on the wall: x along it, y above the eye.
     float roomBay = 0.0;
     float roomCol = 0.0;
     float roomY = 0.0;
@@ -212,11 +220,11 @@ const FRAG = /* glsl */ `
       float bayId = floor((roomX + 0.9) / bayW);
       roomCol = 1.0 - smoothstep(0.3, 0.4, abs(bx));
       roomBay = bayId;
-      // planks: 12–18 cm boards, butt joints staggered; soft seams (defocus)
-      float bh = 0.15;
+      // planks: ~14 cm boards, long (2.6 m between staggered butt joints); soft seams (defocus)
+      float bh = 0.14;
       float row = floor(roomY / bh);
       float fy = fract(roomY / bh);
-      float seg = floor(roomX / 1.3 + hash(vec2(row, 7.0)) * 3.0);
+      float seg = floor(roomX / 2.6 + hash(vec2(row, 7.0)) * 3.0);
       float tone = hash(vec2(row, seg));
       float seamY = 1.0 - smoothstep(0.0, 0.34, min(fy, 1.0 - fy));
       // columns: vertical boards ~20 cm, darker returns at the edges
@@ -225,7 +233,8 @@ const FRAG = /* glsl */ `
       float seamX = 1.0 - smoothstep(0.0, 0.3, min(fract((bx + 0.4) / 0.2), 1.0 - fract((bx + 0.4) / 0.2)));
       float t = mix(tone, ctone, roomCol);
       float seam = mix(seamY, seamX, roomCol);
-      vec3 wal = uWalnutC * (0.62 + 0.6 * t) * (1.0 - 0.22 * seam);
+      // one walnut family: boards differ by ±12 %, never a patchwork
+      vec3 wal = uWalnutC * (0.86 + 0.26 * t) * (1.0 - 0.16 * seam);
       wal *= mix(1.0, 1.0 - 0.5 * smoothstep(0.24, 0.38, abs(bx)), roomCol);
       // light: each column's sconce throws a pool; the wall falls off upward
       vec2 sp = vec2(bx, roomY - 0.55);
@@ -237,23 +246,25 @@ const FRAG = /* glsl */ `
       wal += uBulbC * exp(-sd * sd * 90.0) * 0.55;
       float ceilY = 2.1;
       float wallM = smoothstep(-3.2, -1.4, roomY) * (1.0 - smoothstep(ceilY - 0.12, ceilY + 0.05, roomY));
+      wal = untoe(wal, 0.8);
       c = mix(c, wal, wallM * clamp(uRoom, 0.0, 1.0));
       c += wal * wallM * max(uRoom - 1.0, 0.0);
-      // the ceiling: black paint, silver flex duct crossing it
+      // the ceiling: black paint, long straight galvanized trunk ducts tight under it (ref1)
       float ceilM = smoothstep(ceilY - 0.1, ceilY + 0.25, roomY);
       vec3 ceilc = uCeilC;
       if (dir.y > 0.05) {
         vec2 cp = dir.xz / dir.y * 2.3;
         for (int k = 0; k < 2; k++) {
           float fk = float(k);
-          float zc = (fk < 0.5 ? -2.6 : 3.4) + 0.25 * sin(cp.x * 0.15 + fk);
+          float zc = fk < 0.5 ? -2.6 : 3.4;
           float dz = abs(cp.y - zc);
-          float rad = 0.36;
-          float inD = 1.0 - smoothstep(rad * 0.75, rad * 1.1, dz);
-          float nrm = sqrt(max(0.0, 1.0 - (dz / rad) * (dz / rad)));
-          float ribs = 0.8 + 0.2 * sin(cp.x * 42.0);
-          float lit = (0.35 + 0.65 * nrm) * ribs;
-          ceilc = mix(ceilc, vec3(0.085, 0.082, 0.078) * lit + uWalnutC * 0.12 * nrm, inD * (1.0 - smoothstep(10.0, 22.0, length(cp))));
+          float hw = 0.34;
+          // a flat underside with darker sides (defocused box section), joint flanges every ~1.2 m
+          float inD = 1.0 - smoothstep(hw * 0.85, hw * 1.08, dz);
+          float face = 1.0 - 0.45 * smoothstep(hw * 0.55, hw, dz);
+          float fl = 1.0 - 0.2 * smoothstep(0.455, 0.49, abs(fract(cp.x / 1.2) - 0.5));
+          vec3 galv = vec3(0.075, 0.077, 0.08) * face * fl + uWalnutC * 0.1 * face;
+          ceilc = mix(ceilc, galv, inD * (1.0 - smoothstep(10.0, 22.0, length(cp))));
         }
       }
       c = mix(c, ceilc, ceilM * clamp(uRoom, 0.0, 1.0));

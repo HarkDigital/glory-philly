@@ -11,9 +11,13 @@ import { makeBackBar, makeBarRun, makeCeiling, makeChalkboards, makeRecordColumn
  *   ?lab=room&view=backbar   ref1: the back bar from across the long bar
  *   ?lab=room&view=column    ref4: the record column (one LP face-out)
  *   ?lab=room&view=brick     ref2: "Old 1837" over the bottle shelves
- *   ?lab=room&view=ceiling   the black ceiling, flex duct, pendants
+ *   ?lab=room&view=ceiling   the black ceiling, the trunk duct, pendants
+ *   ?lab=room&view=trunk     close on the galvanized trunk duct · view=flex the round flex run
  *   ?lab=room&view=all       the whole set
  *   &glow=0.6&amb=0.5        bulb/pool level, the kit's bounce light
+ *   &preset=chapter          what a chapter sees: the kit at glow 1 / ambient 1 under
+ *                            the world's DEFAULTS (fill, env, backdrop room) plus a
+ *                            product spot and a rim on the counter (PBR Neutral, exposure 1)
  *
  * local drives a slow product-film drift across each view (0 → 1); 0.5 is
  * the matched frame.
@@ -23,8 +27,10 @@ const params = new URLSearchParams(location.search)
 const VIEW = params.get('view') ?? 'backbar'
 // per-view exposure (ref1 is a daylight photo: more bounce; ref4 is lit by its bulb)
 const EXPOSE: Record<string, [number, number]> = { backbar: [1.2, 1.5], column: [1.3, 1], brick: [1, 0.8], ceiling: [1.1, 1], all: [1.1, 1.1] }
-const GLOW = Number(params.get('glow') ?? (EXPOSE[VIEW] ?? [1, 1])[0])
-const AMB = Number(params.get('amb') ?? (EXPOSE[VIEW] ?? [1, 1])[1])
+const PRESET = params.get('preset') ?? 'lab'
+const CHAPTER = PRESET === 'chapter'
+const GLOW = Number(params.get('glow') ?? (CHAPTER ? 1 : (EXPOSE[VIEW] ?? [1, 1])[0]))
+const AMB = Number(params.get('amb') ?? (CHAPTER ? 1 : (EXPOSE[VIEW] ?? [1, 1])[1]))
 
 class LabRoom implements Chapter {
   id = 'hero'
@@ -54,8 +60,12 @@ class LabRoom implements Chapter {
       depth: 5.2,
       height: 3.45,
       mobile: ctx.mobile,
-      // (it turns up into the ceiling between two joists)
-      ducts: [{ pts: [new THREE.Vector3(-7, 2.95, 1.25), new THREE.Vector3(-4.2, 2.96, 1.2), new THREE.Vector3(-2.75, 2.95, 1.18), new THREE.Vector3(-2.42, 3.2, 1.18), new THREE.Vector3(-2.4, 3.62, 1.18)], radius: 0.24 }],
+      // ref1 top-left: a long straight galvanized trunk tight under the ceiling, ending over the glass bay
+      // (+ a strapped run of the round silver flex behind the camera, for the ceiling view)
+      ducts: [
+        { pts: [new THREE.Vector3(-7, 0, 1.25), new THREE.Vector3(-2.35, 0, 1.25)], size: [0.62, 0.34] },
+        { pts: [new THREE.Vector3(-6, 2.93, 4.1), new THREE.Vector3(0, 2.91, 4.12), new THREE.Vector3(6, 2.94, 4.1)], shape: 'flex', radius: 0.2 },
+      ],
       pendants: [
         { x: 0.6, z: 2.5, drop: 0.58 },
         { x: -2.6, z: 2.6, drop: 0.7 },
@@ -120,6 +130,22 @@ class LabRoom implements Chapter {
 
   update(_l: number, f: Frame, ctx: ChapterContext) {
     const w = ctx.world.params
+    if (CHAPTER) {
+      // the world as a chapter leaves it (defaults), plus a product spot + rim on the back counter
+      w.spot = 0.6
+      w.spotPos.set(1.2, 3.1, 3.2)
+      w.spotAt.set(0, 0.95, 0.4)
+      w.rimA = 0.5
+      syncVinylLights(ctx.world)
+      for (const tt of [this.bar.turntable, this.col.turntable]) {
+        if (!tt) continue
+        tt.setSpeed(33.333)
+        tt.setArm(1)
+        tt.setCue(0)
+        tt.update(f)
+      }
+      return
+    }
     w.top = '#060404'
     w.bottom = '#0a0605'
     w.cyc = 0.15
@@ -159,6 +185,16 @@ class LabRoom implements Chapter {
       out.position.set(-0.04 + drift * 0.2, 2.2, 2.05)
       out.target.set(-0.04 + drift * 0.2, 2.2, 0)
       out.fov = vfov(51, aspect, 1)
+    } else if (VIEW === 'trunk') {
+      // close on the galvanized trunk tight under the ceiling (ref1 top-left)
+      out.position.set(-1.6 + drift * 0.3, 1.75, 3.3)
+      out.target.set(-4.2 + drift * 0.3, 3.0, 1.25)
+      out.fov = portrait ? 70 : 50
+    } else if (VIEW === 'flex') {
+      // the strapped run of round flex (behind the ref1 camera)
+      out.position.set(1.2 + drift * 0.3, 1.7, 1.9)
+      out.target.set(-0.8 + drift * 0.3, 2.95, 4.1)
+      out.fov = portrait ? 70 : 50
     } else if (VIEW === 'ceiling') {
       out.position.set(0.5 + drift, 1.6, 4.4)
       out.target.set(-0.6 + drift, 3.05, 1.2)

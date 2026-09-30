@@ -9,32 +9,36 @@ import { whenRevealed } from '../../kit/images'
 import { StoryClock } from '../../kit/pace'
 import { labelTexture, catNo, syncVinylLights, type PaperName } from '../../kit/vinyl'
 import { GEL } from '../../world/World'
-import { makeWall, makeDisplay, makeLedge, FRAME_X, RAIL_Y, SLEEVE_S, type Display } from './wall'
+import { makeCrewWall, MPW, OUT, ROOM, type CrewWall, type Display } from './wall'
 import { portraitCover, type PortraitCover } from './cover'
 import './people.css'
 
 /*
- * THE CREW — Resonance's "Liner Notes" became the wall of the bar.
+ * THE CREW — Resonance's "Liner Notes", hung on Glory's real back wall.
  *
- * The three people are ALBUM COVERS: 12" sleeves standing in record-store
- * "now playing" displays on Glory's exposed brick (a black steel rail with a
- * lip), each black-and-white portrait the cover photo with the name and role
- * in the cream band, each record half out of its sleeve showing its label
- * (name, role, GLY-051…053), a brass picture light above; The Glorious
- * Archibald is a 7" single between Kevin and Pier; a pint of stout stands on
- * the ledge below. The camera glides from display to display (a StoryClock,
- * never faster than ~0.5 s a move); the record in focus eases a little
- * further out of its sleeve. Each bio is that record's LINER NOTES: a panel
- * beside the display (phones: the display on top, the notes below). Notes
- * that can't fit at once (small phones, short landscape) are set in pages —
- * whole sentences, packed by measurement — that take turns in the panel.
+ * Mike's ref4 is this chapter: a walnut plank column with ONE LP face-out on
+ * a small black steel ledge under a wire-cage bulb, records packed on the
+ * shelves beside it. Here there are three such columns (wall.ts, built from
+ * the room kit): each person's 12" sleeve stands face-out on its column's
+ * ledge — the black-and-white portrait is the cover, the name and role in
+ * the cream band — its record half out to the right showing the label
+ * (name, role, GLY-051…053), a wire-cage Edison sconce above. Between the
+ * columns, shelves packed with LPs over spouted liquor steps; The Glorious
+ * Archibald is a 7" face-out in front of the singles between Kevin and Pier;
+ * the stout stands on a walnut shelf on the brick accent panel past Pier.
+ * The camera glides from column to column (a StoryClock, never faster than
+ * ~0.5 s a move); the record in focus eases a little further out of its
+ * sleeve and its sconce's light comes up. Each bio is that record's LINER
+ * NOTES: a panel beside the display (phones: the display on top, the notes
+ * below). Notes that can't fit at once (small phones, short landscape) are
+ * set in pages — whole sentences, packed by measurement — that take turns.
  *
- *   0.00–0.17  in-beat → the wall: a slow dolly onto all three frames;
+ *   0.00–0.17  in-beat → the wall: a slow dolly onto the three columns;
  *              "About / The people behind the bar." (intro 0.07)
  *   0.17–0.245 glide to Dave         · 0.24–0.425 Dave's panel
  *   0.42–0.49  glide to Kevin Wieman · 0.485–0.695 Kevin's panel
  *   0.69–0.76  glide to Pier Mutovic · 0.755–0.90 Pier's panel
- *   0.895–1.00 out-beat: the camera cranes down to the stout on the ledge
+ *   0.895–1.00 out-beat: the camera cranes down to the stout on its shelf
  *              (post beer → 1, the pour into the Back Room is a stout)
  *
  * Portraits are never stretched: each cover is cover-cropped once at a
@@ -46,8 +50,14 @@ import './people.css'
 /** cover crop focus per portrait (0..1 of the spare height): hair to chin in the photo area */
 const FOCUS: Record<string, [number, number]> = { dave: [0.5, 0.56], kevin: [0.5, 0.11], pier: [0.45, 0.09] }
 const LABEL_PAPER: PaperName[] = ['cream', 'red', 'amber']
-/** the record's centre, right of the sleeve's centre (sleeve units): resting .. in focus */
-const OUT: [number, number] = [0.57, 0.66]
+/**
+ * The room's exposure (after dark, lit by its bulbs as at the bar): the
+ * bulbs + halos, the kit's warm bounce (low, so the light falls off down the
+ * walnut), and the sconce pools (each bulb hangs ~0.6 m over its sleeve).
+ */
+const GLOW = 0.95
+const AMB = 0.2
+const LAMP = 0.55
 
 /** glide windows between poses (q = time-paced local) */
 const GLIDES: [number, number][] = [
@@ -72,9 +82,6 @@ const HOLDS: [number, number][] = [
   [0.97, 1.0],
 ]
 
-/** the stout stands on the ledge just past Pier's display (clear of it, so the out-beat frames it alone) */
-const PINT_X = FRAME_X[2] + 3.3
-
 interface Card {
   root: HTMLElement
   parts: HTMLElement[]
@@ -93,7 +100,7 @@ interface Card {
 interface Pose {
   pos: THREE.Vector3
   tgt: THREE.Vector3
-  /** picture-light levels for the three displays */
+  /** sconce levels for the three columns */
   lamps: [number, number, number]
 }
 
@@ -104,9 +111,9 @@ export default function create(): Chapter {
   const clock = new StoryClock({ rate: 0.12 })
   let q = 0
 
-  const displays: Display[] = []
+  let wall: CrewWall
+  let displays: Display[] = []
   const covers: PortraitCover[] = []
-  let single: Display
   let pint: Glass
 
   // DOM
@@ -298,7 +305,7 @@ export default function create(): Chapter {
     out.pos.copy(_tgt).addScaledVector(_dir, d)
   }
 
-  /** true when nothing of the display rail above the stout is in this view */
+  /** true when nothing of Pier's display (sleeve, record, ledge) is in this view */
   function clearAbove(p: Pose, fov: number) {
     _cam.fov = fov
     _cam.aspect = L.W / L.H
@@ -306,66 +313,68 @@ export default function create(): Chapter {
     _cam.position.copy(p.pos)
     _cam.lookAt(p.tgt)
     _cam.updateMatrixWorld()
-    // the display's lowest edge (rail) and its record's reach
-    const d = displays[2]
-    for (let k = 0; k <= 8; k++) {
-      const x = FRAME_X[2] + lerp(d.left, d.right, k / 8)
-      for (const [y, z] of [[RAIL_Y - 0.08, 0.18], [RAIL_Y + 0.6, 0.12]]) {
-        _v.set(x, y, z).project(_cam)
-        if (_v.z < 1 && _v.x > -1.02 && _v.x < 1.02 && _v.y > -1.02 && _v.y < 1.02) return false
-      }
-    }
+    const b = displays[2].box
+    for (let i = 0; i <= 8; i++)
+      for (let j = 0; j <= 4; j++)
+        for (const z of [b.min.z, b.max.z]) {
+          _v.set(lerp(b.min.x, b.max.x, i / 8), lerp(b.min.y - 0.1, b.max.y, j / 4), z).project(_cam)
+          if (_v.z < 1 && _v.x > -1.02 && _v.x < 1.02 && _v.y > -1.02 && _v.y < 1.02) return false
+        }
     return true
   }
 
   function buildPoses() {
     const { W, H, safeTop, safeBottom, gutter } = L
     const fov = L.portrait ? 34 : 30
-    // THE WALL, above the headline. Desktop / landscape: straight on, the
-    // three displays + the single + the stout ledge spanning the width.
-    // Portrait: a three-quarter view down the wall from the left, Dave near
-    // and large, Kevin beyond him, the single and Pier entering at the edge.
-    const d0 = displays[0]
-    const d2 = displays[2]
-    const sTop = single.group.position.y + single.top
-    const top = Math.max(RAIL_Y + d0.top, sTop) + 0.12
+    const m = MPW
+    const [d0] = displays
+    const colFront = ROOM.colD * m
+    // THE WALL, above the headline. Desktop / landscape: straight on (a hair
+    // from below: the flex duct and the pendants hang in along the top), the
+    // three columns with their sleeves and sconces, the packed bays between.
+    // Portrait: a three-quarter view down the wall from the left, Dave's
+    // display near and large, the bays and Kevin's column running on beyond.
     const y1 = Math.max(safeTop + 120, L.headTop - 18)
     if (L.portrait) {
-      // Dave whole and near; Kevin's sleeve beyond him (his record, the
-      // single and Pier run on past the edge)
-      _min.set(FRAME_X[0] + d0.left - 0.05, RAIL_Y - 0.15, 0)
-      _max.set(FRAME_X[1] + 0.2, RAIL_Y + d0.top + 0.05, 0.3)
-      fitView(poses.wide, _min, _max, gutter, safeTop + 8, W - gutter, y1, 1.02, fov, -0.95, 0.06)
+      _min.set(d0.box.min.x - 0.04 * m, d0.box.min.y - 0.05 * m, d0.box.min.z)
+      _max.set(d0.box.max.x + 0.14 * m, d0.box.max.y + 0.06 * m, d0.box.max.z)
+      fitView(poses.wide, _min, _max, gutter, safeTop + 8, W - gutter, y1, 0.99, fov, -0.66, 0.03)
     } else {
-      // (the ledge runs along below; the displays are the subject)
-      _min.set(FRAME_X[0] + d0.left - 0.15, RAIL_Y - 0.55, 0)
-      _max.set(FRAME_X[2] + d2.right + 0.15, top, 0.3)
-      fitView(poses.wide, _min, _max, gutter, safeTop, W - gutter, y1, 0.98, fov, 0.06, 0.04)
+      const half = (ROOM.colW / 2) * m
+      _min.set(ROOM.cols[0] * m - half - 0.1 * m, d0.box.min.y - 0.34 * m, 0)
+      _max.set(ROOM.cols[2] * m + half + 0.1 * m, d0.bulb.y + 0.14 * m, colFront)
+      fitView(poses.wide, _min, _max, gutter, safeTop, W - gutter, y1, 0.99, fov, 0.05, -0.035)
     }
     poses.wide.lamps = [1, 1, 1]
-    // each display: beside its liner notes (desktop) or above them (portrait)
+    // each display: beside its liner notes (desktop) or above them (portrait);
+    // the sconce's bulb is in the frame on the wider screens
     for (let i = 0; i < 3; i++) {
       const d = displays[i]
       const c = cards[i]
-      const bw = d.right - d.left + 0.25
-      const bh = d.top - d.bottom + 0.25
-      const cx = FRAME_X[i] + (d.left + d.right) / 2
-      const cy = RAIL_Y + (d.top + d.bottom) / 2
+      const pad = 0.035 * m
+      const x0 = d.box.min.x - pad
+      const x1 = d.box.max.x + pad
+      const yb = d.box.min.y - pad
+      const cz = (d.box.min.z + d.box.max.z) / 2
       if (L.portrait) {
+        const yt = d.box.max.y + pad
         const bot = Math.max(safeTop + 110, c.top - 14)
-        fit(poses.p[i], cx, cy, bw, bh, 0.1, gutter, safeTop + 2, W - gutter, bot, 0.96, fov, 0.035, 0.02)
+        fit(poses.p[i], (x0 + x1) / 2, (yb + yt) / 2, x1 - x0, yt - yb, cz, gutter, safeTop + 2, W - gutter, bot, 0.96, fov, 0.035, 0.02)
       } else {
+        // (up to the sconce's socket: the cage and its glow fill the top of the frame)
+        const yt = Math.max(d.box.max.y + pad, d.bulb.y - 0.06 * m)
         const right = Math.max(gutter + 160, c.left - 28)
-        fit(poses.p[i], cx, cy, bw, bh, 0.1, gutter, safeTop, right, H - safeBottom, 0.92, fov, 0.05, 0.03)
+        fit(poses.p[i], (x0 + x1) / 2, (yb + yt) / 2, x1 - x0, yt - yb, cz, gutter, safeTop, right, H - safeBottom, 0.94, fov, 0.05, 0.02)
       }
       poses.p[i].lamps = [0.3, 0.3, 0.3]
       poses.p[i].lamps[i] = 1
     }
-    // the stout on the ledge, close and a touch from above, near enough that
+    // the stout on its shelf, close and a touch from above, near enough that
     // Pier's display (up and to the left) stays wholly out of frame
-    _min.set(PINT_X - 0.42, -0.06, 0.0)
-    _max.set(PINT_X + 0.42, 0.86, 0.42)
-    let fillP = L.portrait ? 0.8 : 0.66
+    const pp = wall.pint
+    _min.set(pp.x - 0.42, pp.y - 0.06, pp.z - 0.26)
+    _max.set(pp.x + 0.42, pp.y + 0.86, pp.z + 0.26)
+    let fillP = L.portrait ? 0.66 : 0.56
     for (let k = 0; k < 8; k++) {
       fitView(poses.pint, _min, _max, gutter, safeTop, W - gutter, H - safeBottom, fillP, fov, -0.12, 0.1)
       if (clearAbove(poses.pint, fov)) break
@@ -498,47 +507,27 @@ export default function create(): Chapter {
     async init(ctx: ChapterContext) {
       buildDom(ctx.stage)
 
-      const wall = makeWall(64, 40)
-      wall.position.set(FRAME_X[1], 6, 0)
-      group.add(wall)
-      await nextFrame()
-
-      // the three albums: portrait covers, labels, rails, picture lights
-      PEOPLE.forEach((p, i) => {
-        const cover = portraitCover({ title: p.name, kicker: p.role, cat: catNo(51 + i), paper: 'cream', focus: FOCUS[p.id] ?? [0.5, 0.2] }, p.photo)
+      // the portraits' covers + labels, the Archibald 7"
+      const specs = PEOPLE.map((p, i) => {
+        // (the ledge's steel lip covers the foot of the sleeve: the band's name is set above it)
+        const cover = portraitCover({ title: p.name, kicker: p.role, cat: catNo(51 + i), paper: 'cream', focus: FOCUS[p.id] ?? [0.5, 0.2] }, p.photo, 1024, 0.052)
         covers.push(cover)
         const label = labelTexture({ title: p.name, sub: p.role, side: 'SIDE A', cat: catNo(51 + i), paper: LABEL_PAPER[i] })
-        const d = makeDisplay({ front: cover.texture, label, scale: SLEEVE_S, out: OUT[1], seed: i })
-        d.group.position.set(FRAME_X[i], RAIL_Y, 0)
-        group.add(d.group)
-        displays.push(d)
+        return { front: cover.texture, label, seed: i }
       })
-      await nextFrame()
-      // the house mascot as a 7" single (decorative)
       const mCover = portraitCover({ title: MASCOT.name, cat: catNo(54), paper: 'stout' }, MASCOT.photo, 512)
       covers.push(mCover)
-      single = makeDisplay({
-        front: mCover.texture,
-        label: labelTexture({ title: MASCOT.name, seven: true, side: 'SIDE A', cat: catNo(54), paper: 'red' }, 384),
-        size: 7,
-        scale: SLEEVE_S,
-        lamp: false,
-        seed: 3,
-      })
-      // hung high in the gap between Kevin's and Pier's displays (salon style)
-      const gap = (FRAME_X[1] + displays[1].right + FRAME_X[2] + displays[2].left) / 2
-      single.group.position.set(gap - (single.left + single.right) / 2, RAIL_Y + 1.78, 0)
-      group.add(single.group)
+      const mLabel = labelTexture({ title: MASCOT.name, seven: true, side: 'SIDE A', cat: catNo(54), paper: 'red' }, 384)
+      await nextFrame()
 
-      // the ledge runs from left of Dave to past the stout
-      const l0 = FRAME_X[0] - 2.5
-      const l1 = PINT_X + 2.2
-      const ledge = makeLedge(l1 - l0)
-      ledge.position.set((l0 + l1) / 2, 0, 0)
-      group.add(ledge)
+      // Glory's back wall: three walnut columns with the sleeves face-out on steel ledges
+      wall = await makeCrewWall(specs, { front: mCover.texture, label: mLabel, seed: 3 }, ctx.mobile)
+      displays = wall.displays
+      group.add(wall.kit.group)
+      await nextFrame()
 
       pint = makeGlass({ shape: 'pint', beer: BEERS.stout, scale: 0.72, fill: 0.95, head: 0.09 })
-      pint.group.position.set(PINT_X, 0, 0.21)
+      pint.group.position.copy(wall.pint)
       group.add(pint.group)
       await nextFrame()
 
@@ -561,23 +550,22 @@ export default function create(): Chapter {
       poseAt(q, cur)
       updateDom(q)
 
-      // picture lights: the album in focus is lit, the others glow low; its
+      // sconces: the column in focus is up, the others a little lower; its
       // record eases a little further out of the sleeve (all from q)
       displays.forEach((d, i) => {
         const lv = cur.lamps[i]
-        if (d.lamp) {
-          d.lamp.spot.intensity = 4.2 * lv
-          d.lamp.glow.emissiveIntensity = 0.35 + 1.5 * lv
-        }
+        wall.setLamp(i, LAMP * (0.62 + 0.38 * lv))
         const f = smoothstep(0.45, 1, lv)
         d.record.group.position.x = lerp(OUT[0], OUT[1], f)
       })
 
       const w = ctx.world.params
-      w.top = '#0e0806'
+      // the room is all built (wall.ts): the backdrop stays black behind it
+      w.top = '#070505'
       w.bottom = '#040201'
       w.cyc = 0
       w.brick = 0
+      w.room = 0
       w.bulbs = 0
       w.haze = 0
       w.bokeh = 0
@@ -585,8 +573,8 @@ export default function create(): Chapter {
       // the key: a dim tungsten spot from high front-left, following the camera
       w.spot = 0.3
       w.spotColor = GEL.tungsten
-      w.spotPos.set(cur.tgt.x - 3.5, 8.5, 8)
-      w.spotAt.set(cur.tgt.x, 1.4, 0)
+      w.spotPos.set(cur.tgt.x - 3.5, cur.tgt.y + 7.5, cur.tgt.z + 8)
+      w.spotAt.set(cur.tgt.x, cur.tgt.y - 0.3, cur.tgt.z - 1)
       w.spotAngle = 0.55
       w.spotPenumbra = 0.85
       w.rimA = 0.55
@@ -595,13 +583,16 @@ export default function create(): Chapter {
       w.rimB = 0.3
       w.rimBColor = GEL.tungsten
       w.rimBDir.set(0.85, 0.2, -1)
-      w.fill = 0.1
-      w.env = 0.7
+      // (low fill + env: the bulbs make the falloff down the walnut, as at the bar)
+      w.fill = 0.06
+      w.env = 0.5
       w.envTurn = 0.3
       syncVinylLights(ctx.world)
+      wall.kit.setGlow(GLOW)
+      wall.kit.setAmbient(AMB)
 
       const p = ctx.post.params
-      // the pour: stout (the pint on the ledge) into the Back Room
+      // the pour: stout (the pint on its shelf) into the Back Room
       p.beer = lerp(0.82, 1, smoothstep(0.55, 0.95, local))
       p.vignette = 0.4
       p.grain = 0.05
@@ -609,8 +600,10 @@ export default function create(): Chapter {
       p.bloomStrength = 0.3
       p.warmth = 0.5
 
-      // idle: the foam is still; the glass just sits there
+      // idle: the foam is still; the glass just sits there. As the camera
+      // cranes down to it, the stout's ruby edge comes up (backlit, not murky)
       pint.group.rotation.y = 0.4
+      pint.setGlow(lerp(0.3, 0.62, smoothstep(0.86, 0.97, q)))
     },
 
     camera(_local: number, frame: Frame, out: CameraPose) {

@@ -6,29 +6,37 @@ import { nextFrame } from '../../core/yield'
 import { BRAND, HERO_UI, LINKS } from '../../content'
 import { BEERS, makeBacklight, makeGlass, makePourStream, type Glass } from '../../kit/beer'
 import { GEL } from '../../world/World'
-import { REC12, syncVinylLights } from '../../kit/vinyl'
-import { DECK_ANCHOR, SET, buildSet, type HeroSet } from './set'
+import { REC12, planeClearance, syncVinylLights } from '../../kit/vinyl'
+import { DECK_ANCHOR, ROOM, SET, buildSet, type HeroSet } from './set'
 import './hero.css'
 
 /*
- * HERO — "This Must Be the Place". Glory after dark: the oiled bar, a
- * stainless tap column, Glory's brick wall and the tall windows onto
- * Chestnut Street. A product film of the first pour.
+ * HERO — "This Must Be the Place". Glory's real back bar after dark (Mike's
+ * ref1), from a stool at the long oiled bar: across the aisle the room kit's
+ * walnut columns and wire-cage sconces, the brick bay with the painted
+ * "Old 1837" over its bottle shelves, the hi-fi (blue ring) carrying the
+ * walnut deck and its red "This Must Be the Place" record with the house
+ * sleeve leaning beside it, the records bay packed with LPs over spouted
+ * liquor steps; a wire-cage pendant hangs over the tap. A product film of
+ * the first pour.
  *
- *   0.00–0.10  LANDING  the painted sign as type (motto → GLORY / Beer Bar &
- *                       Kitchen → tagline → address → Reserve / See the menu);
- *                       the walnut deck spinning a red-label Glory record, arm
- *                       on its rest; an empty tulip glass under the faucet
- *   0.07–0.20  NEEDLE   the tonearm swings over the lead-in and cues down —
- *                       the needle lands as the beer starts to run
+ *   0.00–0.10  LANDING  ref1's view: the painted sign as type on the left
+ *                       (motto → GLORY / Beer Bar & Kitchen → tagline →
+ *                       address → Reserve / See the menu) · the deck spinning
+ *                       on the hi-fi, arm on its rest · the empty tulip under
+ *                       the faucet, the coaster waiting
+ *   0.07–0.20  NEEDLE   the tonearm swings over the lead-in and cues down (the
+ *                       deck stays in shot behind the glass) — the needle
+ *                       lands as the beer starts to run
  *   0.10–0.64  POUR     the glass lifts and tilts under the spout, the handle
  *                       pulls, beer streams in, the glass rights itself as it
- *                       fills, the foam rises; carbonation starts; the copy
- *                       slides aside to a compact caption (tagline kept)
+ *                       fills, the foam rises; carbonation starts (the brick
+ *                       bay, the bottles and the spinning deck behind it)
  *   0.64–0.76  SET DOWN the full glass is carried onto the red-G coaster and
  *                       lands with a small settle; the beer sloshes, damped
- *   0.76–0.93  PAYOFF   slow orbit; "This must be the place." + the CTAs
- *   0.94–1.00  OUT      push toward the glass → the pour cut (amber)
+ *   0.76–0.93  PAYOFF   back to ref1's view, closer, a slow push: "This must be
+ *                       the place." + the CTAs · the deck · the full glass
+ *   0.94–1.00  OUT      push into the glass → the pour cut (amber)
  *
  * Everything derives from `local`; frame.time only drives idle motion
  * (bubbles, the stream's ripples, a breath of camera drift).
@@ -36,13 +44,14 @@ import './hero.css'
 
 interface Key {
   t: number
+  /** the subject (the camera orbits it) */
   fx: number
   fy: number
   fz: number
   az: number
   el: number
   dist: number
-  /** landscape framing: shift the look target along camera right / up, × dist */
+  /** framing: shift the look target along camera right / world up, × dist */
   sx: number
   sy: number
   fov: number
@@ -53,36 +62,60 @@ const PX = SET.pour.x
 const PZ = SET.pour.z
 const CX = SET.coaster.x
 const CZ = SET.coaster.z
+/** the glass on the coaster, its middle */
+const CY = 1.3
 
+/*
+ * CAMERA — two key sets on the same beats, blended by the aspect:
+ * LANDSCAPE (copy on the left): the landing is ref1's view from a stool —
+ * the long bar, the tap with the empty glass at the right, the back bar
+ * across the aisle (the hi-fi + deck at the centre, "Old 1837" over the
+ * bottles, the sconces, the records, the pendant over the pour); the pour
+ * is filmed close with the brick bay and the spinning deck behind; the
+ * payoff returns to ref1's view, closer, the full glass on the coaster.
+ * PORTRAIT (copy below): the back bar stacks above the glass (deck over it).
+ */
 // prettier-ignore
-const KEYS: Key[] = [
-  { t: 0.0,  fx: -1.0,     fy: 1.1,  fz: -0.8, az: 0.3,  el: 0.2,   dist: 12.0, sx: -0.23, sy: -0.02, fov: 34 },
-  { t: 0.1,  fx: -0.9,     fy: 1.15, fz: -0.7, az: 0.34, el: 0.18,  dist: 11.2, sx: -0.21, sy: -0.02, fov: 34 },
-  { t: 0.24, fx: PX - 0.35, fy: 1.95, fz: PZ, az: 0.55, el: 0.08,  dist: 6.9,  sx: -0.07, sy: 0.0,   fov: 34 },
-  { t: 0.42, fx: PX - 0.2, fy: 2.1,  fz: PZ, az: 0.62,  el: 0.0,   dist: 5.8,  sx: -0.06, sy: 0.0,   fov: 34 },
-  { t: 0.58, fx: PX,       fy: 2.15, fz: PZ, az: 0.36,  el: 0.04,  dist: 5.9,  sx: -0.08, sy: 0.0,   fov: 34 },
-  { t: 0.7,  fx: (PX + CX) / 2, fy: 1.7, fz: (PZ + CZ) / 2, az: 0.12, el: 0.09, dist: 7.4, sx: -0.1, sy: 0.0, fov: 34 },
-  { t: 0.8,  fx: 0.3,      fy: 1.3,  fz: -0.2, az: 0.2,   el: 0.16,  dist: 10.2, sx: 0.25,  sy: -0.02, fov: 34 },
-  { t: 0.93, fx: 0.3,      fy: 1.3,  fz: -0.2, az: 0.04,  el: 0.16,  dist: 9.8,  sx: 0.25,  sy: -0.02, fov: 34 },
-  { t: 1.0,  fx: CX,       fy: 1.75, fz: CZ, az: -0.3,  el: 0.05,  dist: 2.6,  sx: 0.0,   sy: 0.0,   fov: 30 },
+const KEYS_L: Key[] = [
+  { t: 0.0,  fx: PX,       fy: 1.2,  fz: -0.1, az: 0.321, el: 0.174, dist: 14.0, sx: -0.269, sy: 0.222, fov: 48.6 },
+  { t: 0.1,  fx: PX,       fy: 1.2,  fz: -0.1, az: 0.335, el: 0.168, dist: 13.3, sx: -0.258, sy: 0.212, fov: 48 },
+  { t: 0.24, fx: PX - 0.35, fy: 1.95, fz: PZ,  az: 0.55,  el: 0.08,  dist: 6.9,  sx: -0.07,  sy: 0.0,   fov: 34 },
+  { t: 0.42, fx: PX - 0.2, fy: 2.1,  fz: PZ,   az: 0.62,  el: 0.0,   dist: 5.8,  sx: -0.06,  sy: 0.0,   fov: 34 },
+  { t: 0.58, fx: PX,       fy: 2.15, fz: PZ,   az: 0.36,  el: 0.04,  dist: 5.9,  sx: -0.08,  sy: 0.0,   fov: 34 },
+  { t: 0.7,  fx: (PX + CX) / 2, fy: 1.7, fz: (PZ + CZ) / 2, az: 0.2, el: 0.1, dist: 7.6, sx: -0.12, sy: 0.04, fov: 38 },
+  { t: 0.8,  fx: CX,       fy: CY,   fz: CZ,   az: 0.327, el: 0.18,  dist: 9.91, sx: -0.303, sy: 0.186, fov: 51.2 },
+  { t: 0.93, fx: CX,       fy: CY,   fz: CZ,   az: 0.37,  el: 0.17,  dist: 9.0,  sx: -0.29,  sy: 0.176, fov: 50.4 },
+  { t: 1.0,  fx: CX,       fy: 1.6,  fz: CZ,   az: 0.3,   el: 0.06,  dist: 2.8,  sx: 0.0,    sy: 0.0,   fov: 34 },
+]
+// prettier-ignore
+const KEYS_P: Key[] = [
+  { t: 0.0,  fx: PX,       fy: 1.2,  fz: -0.1, az: 0.516, el: 0.115, dist: 12.0, sx: -0.06,  sy: -0.111, fov: 59.3 },
+  { t: 0.1,  fx: PX,       fy: 1.2,  fz: -0.1, az: 0.53,  el: 0.11,  dist: 11.5, sx: -0.055, sy: -0.105, fov: 58.5 },
+  { t: 0.24, fx: PX - 0.35, fy: 1.95, fz: PZ,  az: 0.55,  el: 0.12,  dist: 10.7, sx: 0.0,    sy: -0.04,  fov: 42 },
+  { t: 0.42, fx: PX - 0.2, fy: 2.1,  fz: PZ,   az: 0.62,  el: 0.05,  dist: 9.0,  sx: 0.0,    sy: -0.03,  fov: 42 },
+  { t: 0.58, fx: PX,       fy: 2.15, fz: PZ,   az: 0.4,   el: 0.08,  dist: 9.1,  sx: 0.0,    sy: -0.03,  fov: 42 },
+  { t: 0.7,  fx: (PX + CX) / 2, fy: 1.7, fz: (PZ + CZ) / 2, az: 0.45, el: 0.16, dist: 11.2, sx: 0.0, sy: -0.06, fov: 46 },
+  { t: 0.8,  fx: CX,       fy: CY,   fz: CZ,   az: 0.651, el: 0.244, dist: 10.8, sx: -0.039, sy: -0.065, fov: 61.3 },
+  { t: 0.93, fx: CX,       fy: CY,   fz: CZ,   az: 0.625, el: 0.24,  dist: 10.3, sx: -0.039, sy: -0.062, fov: 60.5 },
+  { t: 1.0,  fx: CX,       fy: 1.6,  fz: CZ,   az: 0.45,  el: 0.08,  dist: 3.6,  sx: 0.0,    sy: 0.0,    fov: 42 },
 ]
 
 /** smooth monotone cubic through the keys (no stops at each key) */
-function sample(t: number, prop: Prop): number {
-  const n = KEYS.length
-  if (t <= KEYS[0].t) return KEYS[0][prop]
-  if (t >= KEYS[n - 1].t) return KEYS[n - 1][prop]
+function sample(keys: Key[], t: number, prop: Prop): number {
+  const n = keys.length
+  if (t <= keys[0].t) return keys[0][prop]
+  if (t >= keys[n - 1].t) return keys[n - 1][prop]
   let i = 0
-  while (i < n - 2 && t > KEYS[i + 1].t) i++
-  const k0 = KEYS[i]
-  const k1 = KEYS[i + 1]
+  while (i < n - 2 && t > keys[i + 1].t) i++
+  const k0 = keys[i]
+  const k1 = keys[i + 1]
   const h = k1.t - k0.t
   const s = (t - k0.t) / h
   const slope = (j: number) => {
     if (j <= 0 || j >= n - 1) return 0
-    const a = KEYS[j - 1]
-    const b = KEYS[j]
-    const c = KEYS[j + 1]
+    const a = keys[j - 1]
+    const b = keys[j]
+    const c = keys[j + 1]
     const d0 = (b[prop] - a[prop]) / (b.t - a.t)
     const d1 = (c[prop] - b[prop]) / (c.t - b.t)
     if (d0 * d1 <= 0) return 0
@@ -120,6 +153,48 @@ function pourState(l: number) {
   // the carry to the coaster, landing at 0.745
   const carry = ease.inOutCubic(smoothstep(0.648, 0.745, l))
   return { poured, up, tilt, tiltMax, pull, flow, tail, head, liquid, foam, fill, carry }
+}
+
+/**
+ * ?herodebug: log the clearances of every prop the hero poses by the back bar
+ * (world units; > 0 = clear): the house sleeve against the walnut behind it,
+ * the counter under it, the columns either side and the deck; the deck
+ * against the wall. 1 unit = 7.4 cm.
+ */
+function auditClearances(set: HeroSet) {
+  const K = ROOM.k
+  const wallZ = ROOM.wallZ + 0.02 * K
+  const counterY = ROOM.floorY + 0.92 * K
+  const colC = ROOM.x + (1.1 - 0.3) * K
+  const colB = ROOM.x + (-0.85 + 0.25) * K
+  const wall = new THREE.Plane(new THREE.Vector3(0, 0, 1), -wallZ)
+  const counter = new THREE.Plane(new THREE.Vector3(0, 1, 0), -counterY)
+  const cC = new THREE.Plane(new THREE.Vector3(-1, 0, 0), colC)
+  const cB = new THREE.Plane(new THREE.Vector3(1, 0, 0), -colB)
+  set.group.updateMatrixWorld(true)
+  const sb = new THREE.Box3().setFromObject(set.sleeve.group)
+  const db = new THREE.Box3().setFromObject(set.tt.group)
+  const f = (v: number) => `${v.toFixed(3)} (${((v * 7.4) / 100 * 1000).toFixed(1)} mm)`
+  // exact: every vertex of the deck, in world space
+  const v = new THREE.Vector3()
+  let minZ = Infinity
+  let maxX = -Infinity
+  set.tt.group.traverse(o => {
+    const m = o as THREE.Mesh
+    if (!m.isMesh || !m.visible) return
+    const pos = m.geometry.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld)
+      minZ = Math.min(minZ, v.z)
+      maxX = Math.max(maxX, v.x)
+    }
+  })
+  console.log(`[hero clearances] deck (exact vertices) → walnut ${f(minZ - wallZ)} · → sleeve ${f(sb.min.x - maxX)}`)
+  console.log(
+    `[hero clearances] sleeve→walnut ${f(planeClearance(set.sleeve, wall))} · sleeve→counter ${f(planeClearance(set.sleeve, counter))} · ` +
+      `sleeve→columnC ${f(planeClearance(set.sleeve, cC))} · deck→wall ${f(planeClearance(set.tt, wall))} · deck→columnB ${f(planeClearance(set.tt, cB))} · ` +
+      `deck→counter ${f(planeClearance(set.tt, counter))} · deck↔sleeve x-gap ${f(sb.min.x - db.max.x)}`,
+  )
 }
 
 export default function create(): Chapter {
@@ -160,7 +235,7 @@ export default function create(): Chapter {
 
     async init(ctx: ChapterContext) {
       reduced = ctx.reducedMotion
-      set = buildSet(ctx.mobile)
+      set = await buildSet(ctx.mobile)
       group.add(set.group)
       await nextFrame()
 
@@ -205,6 +280,7 @@ export default function create(): Chapter {
     },
 
     onEnter() {
+      if (location.search.includes('herodebug')) setTimeout(() => auditClearances(set), 600)
       lastRect = ''
       lastRec = ''
       fresh = true
@@ -303,13 +379,14 @@ export default function create(): Chapter {
 
       // THE ROOM (world): bar after dark, brick, bulbs; the key on the glass
       const w = ctx.world.params
-      w.top = '#130b08'
+      w.top = '#0c0807'
       w.bottom = '#050302'
-      w.brick = 0.25
-      w.bulbs = 0.9
-      w.bokeh = 0.25
-      w.haze = 0.18
-      w.cyc = 0.35
+      w.brick = 0
+      w.room = 0.6
+      w.bulbs = 0.7
+      w.bokeh = 0.12
+      w.haze = 0.1
+      w.cyc = 0
       w.cycX = 0.3
       w.cycY = 0.1
       w.spot = 0.75
@@ -327,7 +404,9 @@ export default function create(): Chapter {
       w.fill = 0.14
       w.env = 1
       w.envTurn = 0.25 + 0.4 * smoothstep(0.1, 0.9, l) + (reduced ? 0 : Math.sin(t * 0.07) * 0.05)
-      set.wash.intensity = 60
+      set.wash.intensity = 900
+      set.setGlow(1.45)
+      set.setAmbient(2.0)
 
       // POST: a small settle as the glass lands; the amber pour cut at the end
       const p = ctx.post.params
@@ -398,26 +477,20 @@ export default function create(): Chapter {
 
     camera(local: number, frame: Frame, out: CameraPose) {
       const l = local
-      const q = portraitQ(frame.width / frame.height)
-      const S = (p: Prop) => sample(l, p)
+      const aspect = frame.width / frame.height
+      const q = portraitQ(aspect)
+      const S = (p: Prop) => lerp(sample(KEYS_L, l, p), sample(KEYS_P, l, p), q)
       const drift = reduced ? 0 : Math.sin(frame.time * 0.11) * 0.015
       const az = S('az') + drift
-      const el = S('el') + q * 0.04
-      // portrait: step back (the frame is narrow) and hold the subject high, the copy beneath
-      const payoffQ = window01(l, 0.72, 0.97, 0.06)
-      const dist = S('dist') * lerp(1, lerp(l < 0.16 ? 1.72 : 1.55, 1.45, payoffQ) * (1 - 0.35 * smoothstep(0.93, 1, l)), q)
-      const fov = S('fov') + 6 * q
-      // portrait: the landing centres the record + glass pair; the payoff centres the glass
-      const landQ = 1 - smoothstep(0.1, 0.24, l)
-      const F = tmp.set(S('fx') + q * (-0.45 * landQ + 1.5 * payoffQ), S('fy'), S('fz') + q * 0.6 * payoffQ)
+      const el = S('el')
+      const dist = S('dist')
+      const fov = S('fov')
+      const F = tmp.set(S('fx'), S('fy'), S('fz'))
       out.position.set(F.x + Math.sin(az) * Math.cos(el) * dist, F.y + Math.sin(el) * dist, F.z + Math.cos(az) * Math.cos(el) * dist)
-      // the framing shift: along camera right / up
-      const rx = Math.cos(az)
-      const rz = -Math.sin(az)
-      const sx = lerp(S('sx'), 0, q)
-      const syPortrait = lerp(-0.2, lerp(-0.08, -0.17, payoffQ), smoothstep(0.1, 0.24, l))
-      const sy = lerp(S('sy'), syPortrait * (1 - smoothstep(0.93, 1, l)), q)
-      out.target.set(F.x + rx * sx * dist, F.y + sy * dist, F.z + rz * sx * dist)
+      // the framing shift: along camera right / world up
+      const sx = S('sx')
+      const sy = S('sy')
+      out.target.set(F.x + Math.cos(az) * sx * dist, F.y + sy * dist, F.z - Math.sin(az) * sx * dist)
       out.fov = fov
       out.roll = 0
       out.parallax = reduced ? 0 : 0.12

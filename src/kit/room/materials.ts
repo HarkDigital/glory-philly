@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { COVERS, SPINES, coolerMap, ductMaps, glowTexture, grainDetail, rubberData, spineAtlas, walnutMaps } from './textures'
+import { COVERS, SPINES, coolerMap, ductMaps, galvMaps, glowTexture, grainDetail, rubberData, spineAtlas, walnutMaps } from './textures'
 
 /*
  * ROOM KIT materials. Each kit instance gets its OWN materials (cheap: the
@@ -15,6 +15,28 @@ import { COVERS, SPINES, coolerMap, ductMaps, glowTexture, grainDetail, rubberDa
  */
 
 export const MAX_POOLS = 8
+/** the additive halo's strength at glow 1 */
+export const HALO_K = 0.55
+
+/**
+ * The kit's bounce light (uPoolAmb), linear RGB: nearly neutral on purpose.
+ * The bulbs' pools stay warm, but the SHADOWS must not: Khronos PBR Neutral's
+ * toe subtracts a black level off the smallest channel, so a warm fill on warm
+ * walnut comes out pure orange in the darks (the photos' shadows keep a brown
+ * hue, R/B ≈ 2 in sRGB). A warm key over a near-neutral fill keeps both.
+ */
+export const AMBIENT_TINT = new THREE.Color(1, 0.92, 0.84)
+
+/**
+ * How much of Khronos PBR Neutral's toe the kit's OPAQUE materials pre-cancel
+ * (0 = none, 1 = the kit displays its linear colour below the shoulder).
+ * The toe subtracts a black level taken from the SMALLEST channel, so dim warm
+ * surfaces (walnut, brick, LP spines in shadow) lose their blue and come out
+ * pure orange, where Mike's photos keep them brown. Pre-lifting by the exact
+ * inverse offset keeps their hue — the room reads like the photographs — while
+ * everything else in a chapter keeps the site's curve.
+ */
+export const UNTOE = 0.8
 
 export interface Pool {
   /** kit-local position (metres) */
@@ -34,7 +56,9 @@ export class PoolSet {
     uPoolR: { value: Array.from({ length: MAX_POOLS }, () => 1) },
     uPoolK: { value: 1 },
     /** the bulbs' light bounced round the room (warm ambient in the kit's materials) */
-    uPoolAmb: { value: new THREE.Color(1, 0.84, 0.68).multiplyScalar(0.3) },
+    uPoolAmb: { value: AMBIENT_TINT.clone().multiplyScalar(0.3) },
+    /** the toe pre-cancel on opaque kit materials (see UNTOE) */
+    uUntoe: { value: UNTOE },
   }
   private mv = new THREE.Matrix4()
   private v = new THREE.Vector3()
@@ -75,6 +99,20 @@ const POOL_FRAG_HEAD = /* glsl */ `
   uniform float uPoolR[${MAX_POOLS}];
   uniform float uPoolK;
   uniform vec3 uPoolAmb;
+  uniform float uUntoe;
+`
+/**
+ * After opaque_fragment: pre-lift the colour by the inverse of PBR Neutral's
+ * toe offset (x_min → 6.25·x_min² below 0.08; a flat 0.04 above) so the
+ * tone-mapped result keeps the linear colour's hue in the darks. Exposure 1.
+ */
+const UNTOE_FRAG = /* glsl */ `
+  {
+    vec3 cU = max(gl_FragColor.rgb, vec3(0.0));
+    float mU = min(cU.r, min(cU.g, cU.b));
+    float lU = mU < 0.04 ? 0.4 * sqrt(mU) - mU : 0.04;
+    gl_FragColor.rgb = cU + lU * uUntoe;
+  }
 `
 /** after lights_fragment_end: add each pool's diffuse wrap + a satin lobe */
 const POOL_FRAG = /* glsl */ `
@@ -89,9 +127,9 @@ const POOL_FRAG = /* glsl */ `
       vec3 d = uPoolV[i].xyz - pp;
       float dist = length(d);
       vec3 L = d / max(dist, 1e-4);
-      // a bulb: inverse square with a soft 20 cm core, windowed to its range (metres)
+      // a bulb: inverse square with a soft ~28 cm core (the wall right behind a bulb glows, never blows out), windowed to its range (metres)
       float dm = dist / uPoolV[i].w;
-      float fall = 1.0 / (dm * dm + 0.04) * (1.0 - smoothstep(0.55, 1.0, dm / uPoolR[i]));
+      float fall = 1.0 / (dm * dm + 0.08) * (1.0 - smoothstep(0.55, 1.0, dm / uPoolR[i]));
       float ndl = dot(normal, L);
       float wrap = clamp(ndl * 0.8 + 0.2, 0.0, 1.0);
       pd += uPoolC[i] * fall * wrap;
@@ -114,15 +152,21 @@ const POOL_FRAG = /* glsl */ `
 /**
  * Patch a Mesh(Standard|Physical)Material so the pools light it. Extra
  * vertex/fragment edits compose (pass `more` for a material's own patch).
+ * `untoe: true` also keeps the material's dark tones' hue through PBR
+ * Neutral (see UNTOE) like the kit's own walnut/brick/records — opaque,
+ * non-transmissive materials only. Off by default for your own materials.
  */
 export function withPools<T extends THREE.MeshStandardMaterial>(
   mat: T,
   pools: PoolSet,
   key: string,
   more?: (s: THREE.WebGLProgramParametersWithUniforms) => void,
+  { untoe = false }: { untoe?: boolean } = {},
 ): T {
   const prev = mat.onBeforeCompile
   const prevKey = mat.customProgramCacheKey?.bind(mat)
+  // (decided per compile: glass, halos and transmissive materials never get it)
+  const useUntoe = () => untoe && !mat.transparent && !((mat as unknown as THREE.MeshPhysicalMaterial).transmission > 0)
   mat.onBeforeCompile = (s, r) => {
     prev?.call(mat, s, r)
     more?.(s)
@@ -130,10 +174,16 @@ export function withPools<T extends THREE.MeshStandardMaterial>(
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', `#include <common>\n${POOL_FRAG_HEAD}`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${POOL_FRAG}`)
+    if (useUntoe()) s.fragmentShader = s.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${UNTOE_FRAG}`)
   }
   const base = prevKey ? prevKey() : ''
-  mat.customProgramCacheKey = () => `room-${key}|${base}`
+  mat.customProgramCacheKey = () => `room-${key}${useUntoe() ? '-u' : ''}|${base}`
   return mat
+}
+
+/** the kit's own materials: pools + the hue-keeping toe pre-cancel */
+export function kitPools<T extends THREE.MeshStandardMaterial>(mat: T, pools: PoolSet, key: string, more?: (s: THREE.WebGLProgramParametersWithUniforms) => void): T {
+  return withPools(mat, pools, key, more, { untoe: true })
 }
 
 /** hook a mesh so its material's pools follow it into view space */
@@ -162,6 +212,8 @@ export interface RoomMaterials {
   mirror: THREE.MeshStandardMaterial
   rubber: THREE.MeshStandardMaterial
   duct: THREE.MeshStandardMaterial
+  /** galvanized sheet steel (the rectangular trunk duct on the ceiling, ref1) */
+  galv: THREE.MeshStandardMaterial
   /** Edison bulb envelope (transparent, faintly lit) */
   bulb: THREE.MeshStandardMaterial
   /** the filament (HDR, blooms) */
@@ -192,7 +244,7 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
   const list: THREE.Material[] = []
   const P = <T extends THREE.MeshStandardMaterial>(m: T, key: string, more?: (s: THREE.WebGLProgramParametersWithUniforms) => void) => {
     list.push(m)
-    return withPools(m, pools, key, more)
+    return kitPools(m, pools, key, more)
   }
   const wm = walnutMaps()
   const walnut = P(
@@ -200,13 +252,14 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
       map: wm.map,
       roughnessMap: wm.data,
       bumpMap: wm.data,
-      bumpScale: 2.2,
+      bumpScale: 1.8,
       roughness: 1,
-      envMapIntensity: 0.55,
+      envMapIntensity: 0.5,
     }),
     'walnut',
     s => {
-      // close-range grain: a fine streak map tiled 6× over the plank map, faded out with distance
+      // close-range grain: a fine streak map (~20 × 17 cm per tile; the plank map is 2 : 1),
+      // soft, faded out with distance so it never adds a pattern of its own
       s.uniforms.uGrain = { value: grainDetail() }
       s.fragmentShader = s.fragmentShader
         .replace('#include <common>', '#include <common>\nuniform sampler2D uGrain;')
@@ -214,16 +267,17 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
           '#include <map_fragment>',
           /* glsl */ `#include <map_fragment>
           {
-            vec2 gu = vMapUv * vec2(6.0, 7.0);
+            vec2 gu = vMapUv * vec2(12.0, 7.0);
             float fw = length(fwidth(gu));
             float gd = texture2D(uGrain, gu).r;
-            diffuseColor.rgb *= mix(1.0, 0.72 + 0.56 * gd, 1.0 - smoothstep(0.02, 0.12, fw));
+            diffuseColor.rgb *= mix(1.0, 0.9 + 0.2 * gd, 1.0 - smoothstep(0.02, 0.12, fw));
           }`,
         )
     },
   )
   const steel = P(new THREE.MeshStandardMaterial({ color: '#141414', metalness: 0.55, roughness: 0.42, envMapIntensity: 0.9 }), 'steel')
-  const brass = P(new THREE.MeshStandardMaterial({ color: '#8a6234', metalness: 1, roughness: 0.38, envMapIntensity: 1 }), 'brass')
+  // oil-rubbed, aged brass: dark (a bulb 12 cm away would turn bright brass into a glowing disc)
+  const brass = P(new THREE.MeshStandardMaterial({ color: '#35281a', metalness: 1, roughness: 0.6, envMapIntensity: 1 }), 'brass')
   const chrome = P(new THREE.MeshStandardMaterial({ color: '#c9ccd0', metalness: 1, roughness: 0.14 }), 'chrome')
   const counter = P(
     new THREE.MeshStandardMaterial({ color: '#171312', roughness: 0.34, metalness: 0.05, roughnessMap: wm.data, envMapIntensity: 0.8 }),
@@ -237,13 +291,18 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
   )
   const dm = ductMaps()
   const duct = P(
-    new THREE.MeshStandardMaterial({ map: dm.map, roughnessMap: dm.data, bumpMap: dm.data, bumpScale: 3, color: '#d8d8d4', metalness: 0.72, roughness: 1, envMapIntensity: 1 }),
+    new THREE.MeshStandardMaterial({ map: dm.map, roughnessMap: dm.data, bumpMap: dm.data, bumpScale: 2.4, color: '#dcdcd8', metalness: 0.9, roughness: 1, envMapIntensity: 1.1 }),
     'duct',
+  )
+  const gm = galvMaps()
+  const galv = P(
+    new THREE.MeshStandardMaterial({ map: gm.map, roughnessMap: gm.data, bumpMap: gm.data, bumpScale: 0.4, metalness: 0.8, roughness: 1, envMapIntensity: 1.1 }),
+    'galv',
   )
   const bulb = new THREE.MeshStandardMaterial({
     color: '#fff1dc',
     emissive: new THREE.Color('#ff9a45'),
-    emissiveIntensity: 0.55 * glow,
+    emissiveIntensity: 1.5 * glow,
     roughness: 0.08,
     metalness: 0,
     transparent: true,
@@ -252,11 +311,11 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
     envMapIntensity: 1.6,
   })
   list.push(bulb)
-  const filament = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffb56a').multiplyScalar(4.2 * glow) })
+  const filament = new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffb56a').multiplyScalar(5.5 * glow) })
   list.push(filament)
 
   const glowMat = new THREE.ShaderMaterial({
-    uniforms: { uMap: { value: glowTexture() }, uK: { value: 0.5 * glow } },
+    uniforms: { uMap: { value: glowTexture() }, uK: { value: HALO_K * glow } },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
       varying vec3 vCol;
@@ -269,9 +328,12 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
         #endif
         vec4 c = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
         float s = length((modelMatrix * instanceMatrix * vec4(1.0, 0.0, 0.0, 0.0)).xyz);
-        c.xy += position.xy * s;
-        // pull the halo toward the camera so walls behind never slice it
-        c.z += s * 0.5;
+        // pull the halo toward the camera ALONG ITS RAY (so walls behind never slice it
+        // and it stays centred on the bulb from any angle), shrunk to keep its apparent size
+        float L = length(c.xyz);
+        float k = max(L - s * 0.5, L * 0.5) / max(L, 1e-4);
+        c.xyz *= k;
+        c.xy += position.xy * s * k;
         gl_Position = projectionMatrix * c;
       }
     `,
@@ -283,8 +345,12 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
       void main() {
         // (canvas alpha: its RGB is un-premultiplied white)
         float g = texture2D(uMap, vUv).a;
-        g = g * g;
-        gl_FragColor = vec4(vCol * g * uK, 1.0);
+        // tight: a glow round the glass, not a wash over the wall behind it…
+        float a = g;
+        g = g * g * sqrt(g);
+        // …plus an HDR core the size of the glass (~2 cm): the bulb reads hot and blooms
+        float core = a * a * a;
+        gl_FragColor = vec4(vCol * (g + core * 5.0) * uK, 1.0);
       }
     `,
     transparent: true,
@@ -489,6 +555,7 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
     mirror,
     rubber,
     duct,
+    galv,
     bulb,
     filament,
     glow: glowMat,

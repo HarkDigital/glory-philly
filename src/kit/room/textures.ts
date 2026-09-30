@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { nextFrame } from '../../core/yield'
-import { canvas, clamp, fbm, hash2, lerp, noise1, rng, smoothstep, texFrom, vnoise } from './util'
+import { PLANK_STRETCH, canvas, clamp, fbm, hash2, lerp, noise1, rng, smoothstep, texFrom, vnoise } from './util'
 
 /*
  * ROOM KIT maps — procedural canvases (≤ 1024), built once and cached (the
@@ -17,29 +17,28 @@ export interface PbrMaps {
 
 // ─── reclaimed walnut planks ────────────────────────────────────────────────
 
-/** metres of wall one walnut tile covers (boards run along u) */
+/** metres of wall one walnut tile covers ACROSS the boards (v) */
 export const WALNUT_TILE = 1.2
+/** metres one tile covers ALONG the boards (u): the map is stretched 2 : 1 so boards run long */
+export const WALNUT_ALONG = WALNUT_TILE * PLANK_STRETCH
 
-/** walnut tones, sRGB: chocolate → mid → honey → reddish */
-const WALNUT: [number, number, number][] = [
-  [46, 31, 23],
-  [62, 42, 30],
-  [84, 57, 40],
-  [108, 74, 50],
-  [134, 94, 62],
-  [156, 113, 76],
-  [96, 58, 40],
-  [74, 50, 36],
-]
-const WALNUT_W = [0.9, 1.3, 1.4, 1.2, 0.9, 0.55, 0.8, 1.1]
+/**
+ * ONE warm walnut family (sRGB, before the chroma trim below): every board is
+ * this colour, nudged a little brighter/darker, a little redder or a little
+ * greyer — like the real cladding in ref1/ref2/ref4, where the boards read as
+ * one wall, not a patchwork.
+ */
+const WALNUT_BASE: [number, number, number] = [104, 66, 42]
 /** chroma kept (see the tone-mapping note in walnutGen) */
-const WALNUT_CHROMA = 0.62
+const WALNUT_CHROMA = 0.68
 
 let walnut: PbrMaps | null = null
 /**
- * Reclaimed walnut cladding, 1024² for 1.2 m × 1.2 m: boards 9–19 cm of varied
- * tone (honey → chocolate, the odd pale sapwood edge), butt joints, grain with
- * cathedral figure, saw marks, pores, nail holes; satin (roughness ~0.5).
+ * Reclaimed walnut cladding, 1024² for 1.2 m across × 2.4 m along the boards:
+ * long boards (10–16 cm wide, 1–2.3 m between butt joints) in one warm walnut
+ * family (±7 % in value, a slight red/grey drift board to board), soft grain
+ * with the odd cathedral figure, pores along the grain, faint saw marks, butt
+ * joints with nail pairs; satin (roughness ~0.5).
  */
 export function walnutMaps(): PbrMaps {
   if (walnut) return walnut
@@ -52,12 +51,12 @@ export async function walnutMapsAsync(): Promise<PbrMaps> {
 }
 function* walnutGen(): Generator<void, PbrMaps> {
   const N = 1024
+  /** metres per pixel along (u) and across (v) the boards */
+  const MU = WALNUT_ALONG / N
+  const MV = WALNUT_TILE / N
   const r = rng(71)
-  const pick = () => {
-    let t = r() * WALNUT_W.reduce((a, b) => a + b, 0)
-    for (let i = 0; i < WALNUT.length; i++) if ((t -= WALNUT_W[i]) <= 0) return WALNUT[i]
-    return WALNUT[0]
-  }
+  /** a bell-ish variate in [-0.5, 0.5] (sd ≈ 0.17): most boards near the middle, few extremes */
+  const bell = () => (r() + r() + r()) / 3 - 0.5
   interface Seg {
     x0: number
     len: number
@@ -68,6 +67,8 @@ function* walnutGen(): Generator<void, PbrMaps> {
     f1: number
     p1: number
     cath: number
+    /** how figured this board is (plain ↔ lively), around 1 */
+    fig: number
     cx: number
     cy: number
     ck: number
@@ -76,52 +77,73 @@ function* walnutGen(): Generator<void, PbrMaps> {
     sy: number
     sap: number
     sapTop: boolean
-    bright: number
   }
   interface Row {
     y0: number
     h: number
     segs: Seg[]
   }
+  // board widths 10–16 cm, scaled so the rows tile the map exactly
+  const hs: number[] = []
+  let sum = 0
+  while (sum < N) {
+    const h = lerp(0.1, 0.158, r()) / MV
+    hs.push(h)
+    sum += h
+  }
   const rows: Row[] = []
-  let y = 0
-  while (y < N) {
-    let h = Math.round(lerp(76, 162, r()))
-    if (N - y - h < 72) h = N - y
+  let acc = 0
+  for (const hRaw of hs) {
+    const y0 = Math.round((acc * N) / sum)
+    acc += hRaw
+    const h = Math.round((acc * N) / sum) - y0
     const segs: Seg[] = []
     let x = Math.floor(r() * N)
-    const start = x
     let covered = 0
     while (covered < N) {
-      let len = Math.round(lerp(380, 1100, r()))
-      if (N - covered - len < 200) len = N - covered
-      const col = pick()
+      // long boards: 1–2.3 m between butt joints, a third run the whole 2.4 m tile
+      let len = r() < 0.32 ? N - covered : Math.round(lerp(1.0, 2.3, r()) / MU)
+      if (N - covered - len < 0.7 / MU) len = N - covered
+      // one walnut, board to board: value ±7 % (clamped), a slight red ↔ grey-brown drift
+      // (and now and then a darker, greyer reclaimed board, as in ref4's wall)
+      const dark = r() < 0.1
+      const bright = clamp(1 + 0.6 * bell(), 0.8, 1.2) * (dark ? 0.84 : 1)
+      const warm = bell() * 2
+      const grey = dark ? lerp(0.25, 0.4, r()) : r() < 0.2 ? lerp(0.12, 0.3, r()) : 0
+      let cr = WALNUT_BASE[0] * bright * (1 + 0.05 * warm)
+      let cg = WALNUT_BASE[1] * bright * (1 + 0.012 * warm)
+      let cb = WALNUT_BASE[2] * bright * (1 - 0.07 * warm)
+      if (grey > 0) {
+        const l = 0.3 * cr + 0.59 * cg + 0.11 * cb
+        cr = lerp(cr, l, grey) * 0.97
+        cg = lerp(cg, l, grey) * 0.97
+        cb = lerp(cb, l, grey) * 0.97
+      }
       segs.push({
         x0: x % N,
         len,
-        col,
-        rough: lerp(0.4, 0.62, r()),
+        col: [cr, cg, cb],
+        rough: lerp(0.47, 0.56, r()),
         seed: r() * 1000,
-        a1: lerp(1.5, 6, r()),
-        f1: lerp(0.002, 0.009, r()),
+        // grain wobble along the board: amplitude (m), frequency (rad/m), phase
+        a1: lerp(0.002, 0.007, r()),
+        f1: lerp(1.5, 5, r()),
         p1: r() * 6.28,
-        cath: r() < 0.3 ? lerp(0.35, 0.7, r()) : 0,
-        cx: r() * len,
-        cy: lerp(0.25, 0.75, r()) * h,
-        ck: lerp(0.0005, 0.0016, r()) * (r() < 0.5 ? 1 : -1),
-        saw: r() < 0.4 ? lerp(0.5, 1, r()) : 0,
-        sx: r() * len,
-        sy: (r() < 0.5 ? -1 : 1) * lerp(500, 900, r()),
-        sap: r() < 0.22 ? lerp(0.12, 0.3, r()) : 0,
+        cath: r() < 0.5 ? lerp(0.5, 1, r()) : 0,
+        fig: lerp(0.7, 1.3, r()),
+        cx: r() * len * MU,
+        cy: lerp(0.3, 0.7, r()) * h * MV,
+        ck: lerp(0.35, 1.1, r()) * (r() < 0.5 ? 1 : -1),
+        saw: r() < 0.3 ? lerp(0.5, 1, r()) : 0,
+        sx: r() * len * MU,
+        sy: (r() < 0.5 ? -1 : 1) * lerp(0.5, 0.9, r()),
+        sap: r() < 0.06 ? lerp(0.1, 0.22, r()) : 0,
         sapTop: r() < 0.5,
-        bright: lerp(0.9, 1.1, r()),
       })
       x += len
       covered += len
     }
-    void start
-    rows.push({ y0: y, h, segs })
-    y += h
+    rows.push({ y0, h, segs })
   }
   const rowOf = new Int16Array(N)
   rows.forEach((row, i) => {
@@ -135,12 +157,14 @@ function* walnutGen(): Generator<void, PbrMaps> {
   const dat = dg.createImageData(N, N)
   const C = img.data
   const D = dat.data
+  const TAU = Math.PI * 2
   for (let py = 0; py < N; py++) {
     if (py % 96 === 95) yield
     if (walnut) return walnut
     const row = rows[rowOf[py]]
     const ly = py - row.y0
     const v = ly / row.h
+    const lyM = ly * MV
     const dvEdge = Math.min(ly + 0.5, row.h - ly - 0.5)
     for (let px = 0; px < N; px++) {
       // which segment (they wrap around the tile)
@@ -154,62 +178,66 @@ function* walnutGen(): Generator<void, PbrMaps> {
           break
         }
       }
+      const uM = u * MU
       const duEdge = Math.min(u + 0.5, s.len - u - 0.5)
-      // grain coordinate: across the board, wobbling along it
-      const wob = s.a1 * Math.sin(u * s.f1 + s.p1) + 3 * (n2.n(u * 0.004 + s.seed) - 0.5) * 4
-      let gy = ly + wob
-      // cathedral figure: nested arches around (cx, cy)
+      // grain coordinate (metres across the board), wobbling gently along it
+      const wob = s.a1 * Math.sin(uM * s.f1 + s.p1) + 0.006 * (n2.n(uM * 1.7 + s.seed) - 0.5)
+      let gy = lyM + wob
+      // cathedral figure: soft nested arches (plain-sawn boards)
       let cath = 0
       if (s.cath > 0) {
-        const du = u - s.cx
+        const du = uM - s.cx
         const arch = gy - s.cy + s.ck * du * du
-        const fade = 1 - smoothstep(80, 300, Math.abs(du))
-        const ring = Math.sin(arch * 0.45 + n1.n(u * 0.01 + s.seed) * 2)
-        cath = smoothstep(0.7, 1, ring) * fade * s.cath
+        const fade = 1 - smoothstep(0.15, 0.6, Math.abs(du))
+        const ring = Math.sin(arch * 380 + n1.n(uM * 4 + s.seed) * 2)
+        cath = smoothstep(0.55, 1, ring) * fade * s.cath
         gy = lerp(gy, arch, fade * 0.5)
       }
-      const streak = n1.fbm(gy * 0.07 + s.seed, 4)
-      const fine = n2.fbm(gy * 0.9 + s.seed * 3, 2)
-      const pore = hash2(Math.floor(u / 5) + s.seed, py) > 0.972 ? 1 : 0
-      const mott = fbm(px * 0.005 + s.seed, py * 0.004, 3)
-      // walnut's darker heartwood streaks: broad, wavy bands along the board
-      const heart = smoothstep(0.52, 0.78, n2.fbm(gy * 0.022 + s.seed * 2.3 + 0.35 * Math.sin(u * 0.004 + s.p1), 3))
-      let tone = 0.92 + 0.5 * (streak - 0.5) + 0.24 * (fine - 0.5) - 0.14 * cath - 0.16 * pore - 0.24 * heart
-      // colour drifts along a board (reclaimed stock is never even)
-      tone *= 0.84 + 0.32 * mott
-      tone *= s.bright
+      // soft grain: broad bands (~1.5 cm) + fine lines (~1.5 mm)
+      const streak = n1.fbm(gy * 38 + s.seed, 3)
+      const fine = n2.fbm(gy * 520 + s.seed * 3, 2)
+      // pores: short dark dashes along the grain
+      const pore = hash2(Math.floor(u / 2) + Math.floor(s.seed), py) > 0.976 ? 1 : 0
+      // the colour drifts slowly along a board (reclaimed stock is never quite even)
+      const mott = n2.fbm(uM * 1.1 + s.seed * 1.7 + lyM * 3, 3)
+      // walnut's darker heartwood streaks: broad wavy bands along the board
+      const heart = smoothstep(0.5, 0.8, n2.fbm(gy * 22 + s.seed * 2.3 + 0.35 * Math.sin(uM * 1.8 + s.p1), 3))
+      let tone = 1 + s.fig * (0.28 * (streak - 0.5) + 0.07 * (fine - 0.5) - 0.14 * cath - 0.24 * heart) - 0.07 * pore
+      tone *= 0.94 + 0.12 * mott
       // saw marks on reclaimed stock: faint arcs
       if (s.saw > 0) {
-        const d = Math.hypot(u - s.sx, ly - s.sy)
-        tone *= 1 + 0.045 * s.saw * Math.sin(d * 0.62) * (0.6 + 0.4 * n1.n(d * 0.05))
+        const d = Math.hypot(uM - s.sx, lyM - s.sy)
+        tone *= 1 + 0.03 * s.saw * Math.sin((d * TAU) / 0.011) * (0.6 + 0.4 * n1.n(d * 40))
       }
       let cr = s.col[0] * tone
       let cg = s.col[1] * tone
       let cb = s.col[2] * tone
-      // pale sapwood along one edge (a wavy boundary)
+      // the odd paler sapwood edge (a wavy boundary), kept soft
       if (s.sap > 0) {
         const edgeV = s.sapTop ? v : 1 - v
-        const bound = s.sap + 0.05 * Math.sin(u * 0.01 + s.seed) + 0.03 * (n1.n(u * 0.03) - 0.5)
-        const k = 1 - smoothstep(bound - 0.04, bound + 0.02, edgeV)
-        const pale = 0.9 + 0.2 * (streak - 0.5)
-        cr = lerp(cr, 172 * pale, k * 0.85)
-        cg = lerp(cg, 134 * pale, k * 0.85)
-        cb = lerp(cb, 96 * pale, k * 0.85)
+        const bound = s.sap + 0.05 * Math.sin(uM * 4 + s.seed) + 0.03 * (n1.n(uM * 12) - 0.5)
+        const k = 1 - smoothstep(bound - 0.05, bound + 0.03, edgeV)
+        cr = lerp(cr, 150 * tone, k * 0.45)
+        cg = lerp(cg, 112 * tone, k * 0.45)
+        cb = lerp(cb, 80 * tone, k * 0.45)
       }
-      let hgt = 0.62 + 0.14 * (fine - 0.5) + 0.1 * (streak - 0.5) - 0.12 * pore
-      let rough = s.rough + 0.05 * (fine - 0.5) + 0.08 * (1 - mott)
-      // bevelled seams + butt joints (a dark gap)
-      const e = Math.min(dvEdge, duEdge)
-      if (e < 1.4) {
-        cr = 16
-        cg = 9
-        cb = 6
-        hgt = 0.05
-        rough = 0.95
-      } else if (e < 4.5) {
-        const k = (e - 1.4) / 3.1
-        hgt *= 0.4 + 0.6 * k
-        const dk = 0.72 + 0.28 * k
+      let hgt = 0.62 + 0.1 * (fine - 0.5) + 0.07 * (streak - 0.5) - 0.1 * pore
+      let rough = s.rough + 0.04 * (fine - 0.5) + 0.05 * (1 - mott)
+      // bevelled seams between boards (≈ 1.4 mm gap) + butt joints (≈ 2.3 mm)
+      const eV = dvEdge
+      const eU = duEdge * (MU / MV)
+      const e = Math.min(eV, eU)
+      // tight joints (the real cladding butts closely: a fine dark line, a hint of an arris)
+      if (e < 1.2) {
+        cr *= 0.42
+        cg *= 0.4
+        cb *= 0.4
+        hgt = 0.3
+        rough = 0.85
+      } else if (e < 2.6) {
+        const k = (e - 1.2) / 1.4
+        hgt *= 0.75 + 0.25 * k
+        const dk = 0.88 + 0.12 * k
         cr *= dk
         cg *= dk
         cb *= dk
@@ -233,30 +261,33 @@ function* walnutGen(): Generator<void, PbrMaps> {
   }
   g.putImageData(img, 0, 0)
   dg.putImageData(dat, 0, 0)
-  // nail holes: pairs by the butt joints, a few strays
+  // nail holes (≈ 3 mm; the map is 2 : 1, so they're drawn as ellipses): pairs by the butt joints, a few strays
   const hole = (x: number, yy: number) => {
+    const ry = 0.0014 / MV
+    const rx = 0.0014 / MU
     for (const ox of [-N, 0, N]) {
-      g.fillStyle = 'rgba(22,13,9,0.95)'
+      g.fillStyle = 'rgba(26,16,11,0.9)'
       g.beginPath()
-      g.arc(x + ox, yy, 2.4, 0, Math.PI * 2)
+      g.ellipse(x + ox, yy, rx, ry, 0, 0, Math.PI * 2)
       g.fill()
-      g.fillStyle = 'rgba(0,0,0,0.25)'
+      g.fillStyle = 'rgba(0,0,0,0.18)'
       g.beginPath()
-      g.arc(x + ox, yy, 4, 0, Math.PI * 2)
+      g.ellipse(x + ox, yy, rx * 1.7, ry * 1.7, 0, 0, Math.PI * 2)
       g.fill()
       dg.fillStyle = 'rgb(20,240,0)'
       dg.beginPath()
-      dg.arc(x + ox, yy, 2.4, 0, Math.PI * 2)
+      dg.ellipse(x + ox, yy, rx, ry, 0, 0, Math.PI * 2)
       dg.fill()
     }
   }
   for (const row of rows)
     for (const s of row.segs) {
       if (s.len < N) {
-        hole((s.x0 + 16) % N, row.y0 + row.h * 0.3)
-        hole((s.x0 + 16) % N, row.y0 + row.h * 0.7)
+        const x = (s.x0 + 0.02 / MU) % N
+        hole(x, row.y0 + row.h * 0.3)
+        hole(x, row.y0 + row.h * 0.7)
       }
-      if (r() < 0.5) hole((s.x0 + r() * s.len) % N, row.y0 + row.h * (r() < 0.5 ? 0.28 : 0.72))
+      if (r() < 0.25) hole((s.x0 + r() * s.len) % N, row.y0 + row.h * (r() < 0.5 ? 0.28 : 0.72))
     }
   walnut = { map: texFrom(cv), data: texFrom(dv, { srgb: false }) }
   return walnut
@@ -470,11 +501,11 @@ function* brickGen(w: number, h: number, { lines = [] as PaintLine[], seed = 3, 
           hgt += cover * 0.03
         }
       }
-      // less chroma than a photo (the tone-mapping toe saturates dim tones)
+      // a little less chroma than a photo (the kit pre-cancels most of the tone-mapping toe)
       const lb = 0.3 * cr + 0.59 * cg + 0.11 * cb
-      cr = lb + (cr - lb) * 0.66
-      cg = lb + (cg - lb) * 0.66
-      cb = lb + (cb - lb) * 0.66
+      cr = lb + (cr - lb) * 0.8
+      cg = lb + (cg - lb) * 0.8
+      cb = lb + (cb - lb) * 0.8
       const i = (py * W + px) * 4
       C[i] = clamp(cr, 0, 255)
       C[i + 1] = clamp(cg, 0, 255)
@@ -892,7 +923,11 @@ export function coolerMap(): THREE.Texture {
 // ─── flex duct, rubber mat ──────────────────────────────────────────────────
 
 let duct: PbrMaps | null = null
-/** insulated flex duct foil (256², u along the duct = 0.25 m): spiral ribs + crinkles */
+/**
+ * Insulated flex duct's foil jacket (256², u along the duct = 0.25 m): the
+ * wire helix as soft ridges every ~4 cm, the foil between them creased along
+ * the duct in short shiny facets (glints) — silver, not fabric.
+ */
 export function ductMaps(): PbrMaps {
   if (duct) return duct
   const N = 256
@@ -904,25 +939,102 @@ export function ductMaps(): PbrMaps {
     for (let x = 0; x < N; x++) {
       const u = x / N
       const v = y / N
-      // 6 ribs per tile, spiralling a touch (soft: the foil wraps over the wire)
-      const rib = Math.abs(Math.sin((u * 6 + v * 0.5) * Math.PI))
-      const ribH = 0.55 + 0.45 * Math.pow(rib, 0.35)
-      const crinkle = fbm(x * 0.07, y * 0.03, 4)
-      const fold = Math.abs(vnoise(x * 0.03 + 11, y * 0.11) - 0.5) * 2
-      const t = 0.72 + 0.28 * ribH + 0.18 * (crinkle - 0.5) - 0.15 * (1 - fold)
+      // the helix: 6 ridges per tile, a slight pitch around
+      const ph = (u * 6 + v * 0.5) % 1
+      const ridge = Math.exp(-((ph - 0.5) * (ph - 0.5)) / 0.012)
+      // creases between the ridges: short facets running along the duct (tileable: periodic in both)
+      const cx = Math.cos(u * Math.PI * 2)
+      const sx = Math.sin(u * Math.PI * 2)
+      const crease = vnoise(cx * 2.2 + sx * 1.7 + ph * 3, y * 0.42)
+      const facet = Math.abs(crease - 0.5) * 2
+      const blot = fbm(cx * 2 + 7, sx * 2 + v * 4, 3)
+      const t = 0.9 + 0.12 * ridge + 0.12 * (facet - 0.5) + 0.08 * (blot - 0.5)
       const i = (y * N + x) * 4
-      img.data[i] = clamp(186 * t, 0, 255)
-      img.data[i + 1] = clamp(187 * t, 0, 255)
-      img.data[i + 2] = clamp(184 * t, 0, 255)
+      img.data[i] = clamp(196 * t, 0, 255)
+      img.data[i + 1] = clamp(198 * t, 0, 255)
+      img.data[i + 2] = clamp(200 * t, 0, 255)
       img.data[i + 3] = 255
-      dat.data[i] = clamp((0.3 + 0.55 * ribH + 0.15 * crinkle) * 255, 0, 255)
-      dat.data[i + 1] = clamp((0.3 + 0.35 * crinkle + 0.1 * fold) * 255, 0, 255)
+      dat.data[i] = clamp((0.4 + 0.45 * ridge + 0.14 * facet * (1 - ridge)) * 255, 0, 255)
+      dat.data[i + 1] = clamp((0.14 + 0.26 * (1 - facet) * (1 - ridge) + 0.12 * blot) * 255, 0, 255)
       dat.data[i + 3] = 255
     }
   g.putImageData(img, 0, 0)
   dg.putImageData(dat, 0, 0)
   duct = { map: texFrom(cv), data: texFrom(dv, { srgb: false }) }
   return duct
+}
+
+let galv: PbrMaps | null = null
+/** metres of duct one galvanized tile covers */
+export const GALV_TILE = 0.6
+/**
+ * Galvanized sheet steel (256² for 0.6 m): the zinc SPANGLE (crystals 1.5–4 cm,
+ * each its own grey, sheen and feathery grain) with whitish oxidation streaks
+ * running across the sheet, as on the trunk duct in ref1. R = height, G = roughness.
+ */
+export function galvMaps(): PbrMaps {
+  if (galv) return galv
+  const N = 256
+  const r = rng(301)
+  // spangle seeds on a jittered grid (tileable: distances wrap)
+  const cells: { x: number; y: number; tone: number; rough: number; ang: number; k: number }[] = []
+  const G = 20
+  for (let j = 0; j < G; j++)
+    for (let i = 0; i < G; i++)
+      cells.push({ x: ((i + r()) * N) / G, y: ((j + r()) * N) / G, tone: lerp(0.96, 1.04, r()), rough: lerp(0.32, 0.5, r()), ang: r() * Math.PI, k: lerp(0.4, 1, r()) })
+  const { cv, g } = canvas(N)
+  const { cv: dv, g: dg } = canvas(N)
+  const img = g.createImageData(N, N)
+  const dat = dg.createImageData(N, N)
+  const wrapD = (a: number) => {
+    const d = Math.abs(a) % N
+    return Math.min(d, N - d)
+  }
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++) {
+      // nearest two seeds → the crystal and how close its boundary is
+      let d1 = 1e9
+      let d2 = 1e9
+      let best = cells[0]
+      const gi = Math.floor((x * G) / N)
+      const gj = Math.floor((y * G) / N)
+      for (let k = 0; k < 9; k++) {
+        const cl = cells[((gj + ((k / 3) | 0) - 1 + G) % G) * G + ((gi + (k % 3) - 1 + G) % G)]
+        const dx = wrapD(x - cl.x)
+        const dy = wrapD(y - cl.y)
+        const d = dx * dx + dy * dy
+        if (d < d1) {
+          d2 = d1
+          d1 = d
+          best = cl
+        } else if (d < d2) d2 = d
+      }
+      const edge = Math.sqrt(d2) - Math.sqrt(d1)
+      const bound = 1 - smoothstep(0, 1.6, edge)
+      // feathery dendrites inside each crystal (directional fine noise)
+      const ca = Math.cos(best.ang)
+      const sa = Math.sin(best.ang)
+      const fx = x * ca + y * sa
+      const fy = -x * sa + y * ca
+      const feather = vnoise(fx * 0.9, fy * 0.12 + best.ang * 10)
+      // oxidation: pale streaks across the sheet (along v), tileable in both axes
+      const streak = smoothstep(0.55, 0.85, fbm(Math.cos((x / N) * Math.PI * 2) * 3 + 11, Math.sin((x / N) * Math.PI * 2) * 3 + (y / N) * 0.8, 3))
+      const blot = fbm((x / N) * 6, (y / N) * 6, 3)
+      let t = best.tone * (0.97 + 0.05 * feather * best.k) - 0.035 * bound
+      t = lerp(t, 1.2, streak * 0.3) * (0.95 + 0.1 * blot)
+      const i = (y * N + x) * 4
+      img.data[i] = clamp(146 * t, 0, 255)
+      img.data[i + 1] = clamp(150 * t, 0, 255)
+      img.data[i + 2] = clamp(154 * t, 0, 255)
+      img.data[i + 3] = 255
+      dat.data[i] = clamp((0.55 + 0.05 * feather - 0.06 * bound) * 255, 0, 255)
+      dat.data[i + 1] = clamp((best.rough + 0.06 * feather + 0.3 * streak + 0.08 * bound) * 255, 0, 255)
+      dat.data[i + 3] = 255
+    }
+  g.putImageData(img, 0, 0)
+  dg.putImageData(dat, 0, 0)
+  galv = { map: texFrom(cv), data: texFrom(dv, { srgb: false }) }
+  return galv
 }
 
 let rubber: THREE.Texture | null = null

@@ -4,20 +4,44 @@ import { el, rise, setRise } from '../../core/dom'
 import { clamp, lerp, smoothstep } from '../../core/math'
 import { nextFrame } from '../../core/yield'
 import { BRAND, CREDIT, HOURS, KITCHEN_HOURS, LINKS, RESERVATIONS, SECTIONS, SOCIALS, VISIT_UI } from '../../content'
-import { TT, catNo, makeRecord, makeSleeve, makeTurntable, syncVinylLights, tracklistTexture } from '../../kit/vinyl'
+import { TT, catNo, leanAgainst, localBounds, makeRecord, makeSleeve, makeTurntable, planeClearance, syncVinylLights, tracklistTexture } from '../../kit/vinyl'
 import { makeGlass, BEERS } from '../../kit/beer'
 import { makeBarTop } from '../../kit/bar'
-import { WIN, SIGN, STREET_Z, drawSign, makeCoaster, makeConsole, makeSign, makeStreet, makeVotive, makeWall, makeWindow } from './scene'
+import { withPools } from '../../kit/room'
+import { poolHook } from '../../kit/room/materials'
+import {
+  BRICK_Z,
+  CONSOLE,
+  COL_A,
+  COL_B,
+  WIN,
+  SIGN,
+  STREET_Z,
+  drawSign,
+  makeFloor,
+  makeCoaster,
+  makeRoom,
+  makeSign,
+  makeStreet,
+  makeVotive,
+  makeWindow,
+  placeConsoleTop,
+  prepareVisitRoom,
+  type VisitRoom,
+} from './scene'
 import './visit.css'
 
 /*
  * LAST CALL (visit) — the site's ending. 1.8 vh, lands at 0.3.
  *
  * The front of the house at night, from inside, and the last record of the
- * night. Glory's tall black-framed window onto cobbled Chestnut Street (warm
- * brick facades out of focus, a lantern, a lit bay window, now and then a
- * car's lights sliding past); the painted wall sign on the brick beside it;
- * under the sign a low black console with a walnut deck playing "Last Call"
+ * night — in Glory's real room (the room kit: walnut-clad columns with
+ * wire-cage sconces, the black ceiling with its silver duct and a cage
+ * pendant). Glory's tall black-framed window onto cobbled Chestnut Street
+ * (warm brick facades out of focus, a lantern, a lit bay window, now and
+ * then a car's lights sliding past), a clad column beside it; the painted
+ * wall sign on the exposed brick bay (ref5); under the sign an ebonised
+ * record console packed with LPs, a walnut deck on it playing "Last Call"
  * (GLY-007), its sleeve propped against the brick behind, back out (Side A ·
  * Hours / Side B · Visit — decorative; the DOM card is the readable copy);
  * on the sill a last gold pint on a G-roundel coaster next to a votive. The
@@ -29,9 +53,19 @@ import './visit.css'
  *   0.10–0.15  the cue lifts the stylus off the run-out groove
  *   0.14–0.30  the platter winds down from 33⅓ to a stop
  *   0.15–0.27  the tonearm swings back to its rest; 0.27–0.31 it lowers onto it
- *   0.00–0.34  the camera pulls back and up to the whole window + sign
+ *   0.00–0.34  the camera pulls back and up to the whole front: the duct
+ *              under the black ceiling, the sign, the column + sconce, the
+ *              window + pendant, the pint, the LPs in the console
+ *   0.10–0.30  the warm rim eases in with the pull-back (on the close-up it
+ *              would flood the deck's plinth)
  *   0.075–0.2  the card: eyebrow + headline rise, then its blocks in order
  *   0.34–1.00  hold. Nothing moves but light: the votive, the street, a car.
+ *
+ * NO CLIPPING: the sleeve is posed by the vinyl kit's leanAgainst (on a
+ * wrapper that keeps its π turn), its foot on the console top and its
+ * nearest corner 0.014 kit units off the brick; the deck stands clear in
+ * front of it. In dev, window.__visitClear holds the audit (brick, console
+ * top, column A, and a separating-axis gap to every solid deck mesh; > 0 clear).
  *
  * It's the last chapter: no out-cut, it holds to the end of the page.
  */
@@ -40,13 +74,13 @@ const DOLLY_END = 0.34
 /** where the pint lands on the sill */
 const PINT = new THREE.Vector3(1.95, WIN.y0, 0.42)
 
-/** the console under the sign: x span, depth off the wall, top height (= the sill) */
-const CONSOLE = { x0: -2.85, x1: 0.42, depth: 2.5, top: WIN.y0 }
 /**
  * The deck on the console: base centre, yaw (turned a touch toward the
  * window), and scale (kit units: a 12" sleeve = 1; this room is ~1.9x that).
  */
-export const DECK = { position: new THREE.Vector3(-1.2, CONSOLE.top, 1.3), yaw: 0.12, scale: 1.9, top: CONSOLE.top }
+export const DECK = { position: new THREE.Vector3(-1.62, CONSOLE.top, 1.5), yaw: 0.12, scale: 1.9, top: CONSOLE.top }
+/** its sleeve, leaning on the brick behind the deck (left of it), back out */
+const SLEEVE = { x: -2.4, lean: 0.1, yaw: 0.04 }
 
 /** group identical consecutive bar hours: Mon – Wed / Thu – Sun */
 function groupedHours() {
@@ -87,17 +121,69 @@ function ext(parent: HTMLElement, cls: string, href: string, html: string) {
   return a
 }
 
+/**
+ * Dev audit: the smallest separation between two objects' oriented bounds
+ * (their own-frame boxes in world space), by the separating-axis test.
+ * > 0: that much air on the best axis; ≤ 0: the boxes overlap.
+ */
+function boxGap(a: THREE.Object3D, b: THREE.Object3D): number {
+  const obb = (o: THREE.Object3D) => {
+    const bb = localBounds(o)
+    const m = o.matrixWorld
+    const pts: THREE.Vector3[] = []
+    for (let i = 0; i < 8; i++) pts.push(new THREE.Vector3(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z).applyMatrix4(m))
+    const e = new THREE.Matrix3().setFromMatrix4(m)
+    const ax = [0, 1, 2].map(k => new THREE.Vector3().setFromMatrix3Column(e, k).normalize())
+    return { pts, ax }
+  }
+  const A = obb(a)
+  const B = obb(b)
+  const axes = [...A.ax, ...B.ax]
+  for (const u of A.ax) for (const v of B.ax) {
+    const c = new THREE.Vector3().crossVectors(u, v)
+    if (c.lengthSq() > 1e-8) axes.push(c.normalize())
+  }
+  let best = -Infinity
+  for (const n of axes) {
+    const pa = A.pts.map(p => p.dot(n))
+    const pb = B.pts.map(p => p.dot(n))
+    const gap = Math.max(Math.min(...pb) - Math.max(...pa), Math.min(...pa) - Math.max(...pb))
+    best = Math.max(best, gap)
+  }
+  return best
+}
+
+/** dev audit: the smallest boxGap between `a` and any solid mesh under `b` (flat decals such as contact shadows skipped) */
+function meshGap(a: THREE.Object3D, b: THREE.Object3D): number {
+  let min = Infinity
+  b.traverse(o => {
+    const m = o as THREE.Mesh
+    if (!m.isMesh || !m.visible) return
+    const bb = localBounds(m)
+    const s = bb.getSize(new THREE.Vector3())
+    if (Math.min(s.x, s.y, s.z) < 1e-4) return
+    min = Math.min(min, boxGap(a, m))
+  })
+  return min
+}
+
 export default function create(): Chapter {
   const group = new THREE.Group()
   let reduced = false
 
   // ---- set ----------------------------------------------------------------
-  const wall = makeWall()
+  // (the room itself — brick, walnut, columns, sconces, ceiling, the record
+  // console — is the room kit, built in init once its maps are ready)
+  let room: VisitRoom | null = null
+  const floor = makeFloor()
   const win = makeWindow()
   const street = makeStreet()
   const sign = makeSign()
-  const sill = makeBarTop({ length: WIN.x1 - WIN.x0 + 0.5, depth: 1.05, thickness: 0.14 })
-  sill.position.set((WIN.x0 + WIN.x1) / 2, WIN.y0, 0.18)
+  // the sill: from the clad column across the window, its far end let into the walnut
+  const sillX0 = COL_B.x1
+  const sillX1 = WIN.x1 + 0.25
+  const sill = makeBarTop({ length: sillX1 - sillX0, depth: 1.05, thickness: 0.14 })
+  sill.position.set((sillX0 + sillX1) / 2, WIN.y0, 0.18)
   {
     // a worn, oiled sill: a softer sheen than the bar top, so the rims from the
     // street don't mirror off it as one big glare
@@ -112,13 +198,13 @@ export default function create(): Chapter {
   const votive = makeVotive()
   votive.group.position.set(3.55, WIN.y0, 0.42)
   votive.group.scale.setScalar(1.25)
-  group.add(wall, win.group, street.mesh, sign.mesh, sill, pint.group, coaster, votive.group)
+  group.add(floor, win.group, street.mesh, sign.mesh, sill, pint.group, coaster, votive.group)
 
   pint.group.position.set(PINT.x, PINT.y + 0.012, PINT.z)
   coaster.position.set(PINT.x, PINT.y + 0.0125, PINT.z)
 
   // ---- the last record of the night: a walnut deck on a black console
-  const consoleTop = makeBarTop({ length: CONSOLE.x1 - CONSOLE.x0 + 0.08, depth: CONSOLE.depth, thickness: 0.12 })
+  const consoleTop = makeBarTop({ length: CONSOLE.x1 - CONSOLE.x0, depth: CONSOLE.depth, thickness: CONSOLE.thick })
   {
     const m = consoleTop.material as THREE.MeshPhysicalMaterial
     m.clearcoat = 0.1
@@ -126,7 +212,7 @@ export default function create(): Chapter {
     m.roughness = 0.62
     m.specularIntensity = 0.3
   }
-  const consoleG = makeConsole(CONSOLE.x0, CONSOLE.x1, CONSOLE.depth, CONSOLE.top, consoleTop)
+  placeConsoleTop(consoleTop)
   const deckSlot = new THREE.Group()
   deckSlot.name = 'visit-deck-slot'
   deckSlot.position.copy(DECK.position)
@@ -157,13 +243,16 @@ export default function create(): Chapter {
       notes: BRAND.motto,
     }),
   })
+  // posed by the vinyl kit's leanAgainst on a wrapper (the sleeve turned π
+  // inside it, back out): its foot stands on the console top and its nearest
+  // corner stops a set gap in front of the brick — nothing dips or clips
   const lean = new THREE.Group()
-  lean.position.set(-1.95, CONSOLE.top, 0.32)
-  lean.rotation.set(-0.13, 0.05, 0)
+  lean.name = 'visit-sleeve'
+  lean.scale.setScalar(DECK.scale)
   sleeve.group.rotation.y = Math.PI
-  sleeve.group.scale.setScalar(DECK.scale)
   lean.add(sleeve.group)
-  group.add(consoleG, lean, deckSlot)
+  group.add(consoleTop, lean, deckSlot)
+  const leanPose = leanAgainst(lean, { wallZ: BRICK_Z, floorY: CONSOLE.top, x: SLEEVE.x, lean: SLEEVE.lean, yaw: SLEEVE.yaw, clearance: 0.014 })
   // the platter's centre in world space (the dolly starts close on it)
   const platterAt = new THREE.Vector3(TT.px, TT.platterTop, TT.pz)
     .multiplyScalar(DECK.scale)
@@ -318,7 +407,7 @@ export default function create(): Chapter {
   const startPos = new THREE.Vector3()
   const startTgt = new THREE.Vector3()
   /** Straight-on framing that fits a world box into the free part of the screen. */
-  function fit(frame: Frame, fov: number, x0: number, x1: number, y0: number, y1: number, outPos: THREE.Vector3, outTgt: THREE.Vector3) {
+  function fit(frame: Frame, fov: number, x0: number, x1: number, y0: number, y1: number, outPos: THREE.Vector3, outTgt: THREE.Vector3, lift = 0) {
     const a = frame.width / Math.max(1, frame.height)
     const t = Math.tan(THREE.MathUtils.degToRad(fov / 2))
     // free region in NDC
@@ -334,7 +423,9 @@ export default function create(): Chapter {
     const bh = (y1 - y0) / 2
     const d = Math.max(bw / (t * a * hw * 0.94), bh / (t * hh * 0.94))
     const X = (x0 + x1) / 2 - cx * d * t * a
-    const Y = (y0 + y1) / 2 - cy * d * t
+    // spare height (the width bound): lift the box up to `lift`, so the ceiling's duct edges in at the top
+    const slack = Math.max(0, d * t * hh * 0.94 - bh)
+    const Y = (y0 + y1) / 2 - cy * d * t + Math.min(slack, lift)
     outPos.set(X, Y, d)
     outTgt.set(X, Y, 0)
   }
@@ -347,6 +438,41 @@ export default function create(): Chapter {
     async init(ctx: ChapterContext) {
       reduced = ctx.reducedMotion
       buildHud(ctx.stage)
+      await nextFrame()
+      // the room kit: maps across frames, then the room as one kit
+      await prepareVisitRoom()
+      room = makeRoom({ mobile: ctx.mobile })
+      group.add(room.kit.group)
+      // the bulbs' light pools also fall on this chapter's own pieces (the sign,
+      // the sill, the console top, the window frame, the sleeve), so the walnut
+      // and the brick aren't the only things the sconces light
+      const pools = room.kit.materials.pools
+      const hook = (mesh: THREE.Mesh, key: string) => {
+        withPools(mesh.material as THREE.MeshStandardMaterial, pools, `visit-${key}`)
+        poolHook(mesh, pools, room!.kit.group)
+      }
+      hook(sign.mesh, 'sign')
+      hook(sill, 'sill')
+      hook(consoleTop, 'console')
+      hook(win.frame, 'frame')
+      // (the sleeve stays on the key alone: its cream title would bloom in the pools)
+      // the duct's silver sits back a touch: it's the frame's top edge, not a subject
+      room.kit.materials.duct.color.multiplyScalar(0.8)
+      if (import.meta.env.DEV) {
+        // the no-clip audit (world units; > 0 clear): the sleeve's nearest corner vs the
+        // brick, its foot vs the console top, its edge vs column A, and the deck's box
+        group.updateMatrixWorld(true)
+        const P = (nx: number, ny: number, nz: number, c: number) => new THREE.Plane(new THREE.Vector3(nx, ny, nz), c)
+        ;(window as unknown as { __visitClear?: object }).__visitClear = {
+          brick: planeClearance(lean, P(0, 0, 1, -BRICK_Z)),
+          top: planeClearance(lean, P(0, 1, 0, -CONSOLE.top)),
+          colA: planeClearance(lean, P(1, 0, 0, -COL_A.x1)),
+          deck: meshGap(lean, deck.group),
+          gap: leanPose.gap,
+          foot: leanPose.foot,
+        }
+        ;(window as unknown as { __visitDebug?: object }).__visitDebug = { deck, lean, group, localBounds, boxGap }
+      }
       await nextFrame()
       // the painted sign: redraw once Alfa Slab One is really there
       const redraw = () => {
@@ -415,6 +541,17 @@ export default function create(): Chapter {
 
       pendant.intensity = 3.2
 
+      // ---- the room: the cage bulbs hold steady (drive the level, never toggle)
+      if (room) {
+        room.kit.setGlow(1)
+        room.kit.setAmbient(1)
+        // the bulbs themselves read hotter than their pools (the camera sits back from them)
+        const M = room.kit.materials
+        M.glow.uniforms.uK.value *= 2.6
+        M.filament.color.multiplyScalar(1.7)
+        M.bulb.emissiveIntensity *= 2.4
+      }
+
       // ---- lights
       const w = ctx.world.params
       w.top = '#07060a'
@@ -426,11 +563,14 @@ export default function create(): Chapter {
       w.haze = 0
       w.spot = 0.95
       w.spotColor = '#ffdcb4'
-      w.spotPos.set(-2.2, 9.5, 10)
-      w.spotAt.set(-1.3, 3.1, 0.7)
+      w.spotPos.set(-2.6, 9.5, 10)
+      w.spotAt.set(-1.7, 3.1, 0.7)
       w.spotAngle = 0.3
       w.spotPenumbra = 0.9
-      w.rimA = 0.9
+      // the warm rim makes the pint glow against the window; on the close-up
+      // (the camera looking down at the deck) it would flood the plinth, so it
+      // eases in with the pull-back
+      w.rimA = still ? 0.9 : lerp(0.18, 0.9, smoothstep(0.1, 0.3, local))
       w.rimAColor = '#ffc27a'
       w.rimADir.set(0.3, 0.75, -1)
       w.rimB = 0.1
@@ -458,9 +598,9 @@ export default function create(): Chapter {
       const fov = portrait ? 40 : 34
       if (portrait) {
         // phones and tall tablets: the pint against the window, the sign above-left
-        fit(frame, fov, CONSOLE.x0 + 0.1, WIN.x1 + 0.15, WIN.y0 - 0.6, SIGN.y1 - 0.2, pos, tgt)
+        fit(frame, fov, SIGN.x0 + 0.1, WIN.x1 + 0.15, WIN.y0 - 0.6, SIGN.y1 - 0.2, pos, tgt)
       } else {
-        fit(frame, fov, SIGN.x0 - 0.3, WIN.x1 + 0.35, WIN.y0 - 0.9, WIN.y1 - 0.7, pos, tgt)
+        fit(frame, fov, SIGN.x0 - 0.3, WIN.x1 + 0.35, WIN.y0 - 0.9, WIN.y1 - 0.7, pos, tgt, 0.3)
       }
       // the street keeps a lit window straight behind the pint, seen from the resting pose
       {

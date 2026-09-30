@@ -1,15 +1,25 @@
 import * as THREE from 'three'
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { makeBarTop, makeBrickWall, makeDripTray, makeFaucet, stainless, woodMaps } from '../../kit/bar'
+import { makeDripTray, makeFaucet, stainless } from '../../kit/bar'
 import { BRAND } from '../../content'
-import { catNo, coverTexture, drawRoundel, makeRecord, makeSleeve, makeTurntable, onFonts, type Record, type Sleeve, type Turntable } from '../../kit/vinyl'
+import { catNo, coverTexture, drawRoundel, makeRecord, makeTurntable, onFonts, type Record, type Sleeve, type Turntable } from '../../kit/vinyl'
+import { makeBackBar, makeBarRun, makeCeiling, prepareRoom, type RoomKit } from '../../kit/room'
 
 /*
- * HERO SET — Glory after dark, 126 Chestnut Street: the oiled bar, a
- * stainless tap column with one faucet over a drip tray, the red-G coaster,
- * and behind it the exposed brick wall with the tall black-framed windows
- * onto Chestnut Street (the street glows through them: it's what the beer
- * glows against).
+ * HERO SET — Glory's real back bar (Mike's ref1), seen from a stool at the
+ * long bar. Foreground: the long oiled bar with its black rubber rail, a
+ * stainless tap post with one faucet over a drip tray, the red-G coaster.
+ * Across the bartender's aisle: the room kit's back bar (src/kit/room) —
+ * walnut plank columns with wire-cage sconces, the brick bay with the painted
+ * "Old 1837" over two shelves of bottles, the hi-fi (receiver with the blue
+ * ring) carrying Glory's walnut deck and its red "This Must Be the Place"
+ * record, the house sleeve leaning beside it, the records bay packed with LPs
+ * over spouted liquor steps and a mirror strip, coolers glowing below. Over
+ * it all the black ceiling, silver flex duct and a wire-cage pendant hanging
+ * over the pour.
+ *
+ * Units: the hero's (1 unit ≈ 7.4 cm; the tulip is 2.42 units ≈ 18 cm); the
+ * long bar's top is y = 0. The room kit works in metres: ROOM.k = units per
+ * metre, and its floor sits 1.07 m under the bar top.
  */
 
 /** where things stand (world units; the bar top is y = 0) */
@@ -22,81 +32,37 @@ export const SET = {
   tower: new THREE.Vector3(0.9, 0, -1.3),
   towerR: 0.17,
   faucetY: 3.3,
-  wallZ: -5.2,
+}
+
+const K = 100 / 7.4
+/** the room kit in hero units */
+export const ROOM = {
+  /** hero units per metre */
+  k: K,
+  /** the floor, 1.07 m under the long bar's top */
+  floorY: -1.07 * K,
+  /** the back wall (the kit's z = 0) */
+  wallZ: -22.2,
+  /** the kit's x = 0 (its brick bay's hi-fi sits at kit x 0.22 m) */
+  x: -18,
+  /** the long bar: its customer edge (+z) and depth (metres) */
+  barEdgeZ: 2.35,
+  barDepth: 0.64,
 }
 
 /**
- * THE DECK — a walnut turntable (src/kit/vinyl) on the back bar, LEFT of the
- * tap column, spinning a red-label Glory record; a sleeve leans on the brick
- * behind it. Real size against the glass: the tulip is 2.42 units (~18 cm),
- * so 1 unit ≈ 7.4 cm and the kit's unit (a 12" sleeve, 31.5 cm) is ×4.26.
+ * THE DECK — Glory's walnut turntable (src/kit/vinyl) where the real one is:
+ * on the hi-fi on the back counter (the room kit's `turntable` seat), spinning
+ * the red-label Glory record. The kit's 12" unit is 0.315 m, so its scale in
+ * hero units is 0.315 × ROOM.k (≈ 4.26: the old DECK_ANCHOR scale, unchanged).
  */
 export const DECK_ANCHOR = {
-  position: new THREE.Vector3(-2.85, 0, -1.95),
-  rotationY: 0.2,
-  scale: 31.5 / 7.4,
+  scale: 0.315 * K,
   cmPerUnit: 7.4,
 }
 
-/** a tiny canvas of Chestnut Street at dusk, seen through old glass (the low resolution is the blur) */
-function streetTexture(): THREE.CanvasTexture {
-  const w = 96
-  const h = 160
-  const cv = document.createElement('canvas')
-  cv.width = w
-  cv.height = h
-  const g = cv.getContext('2d')!
-  let seed = 29
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-  // dusk sky over the rooftops across the street
-  const sky = g.createLinearGradient(0, 0, 0, h * 0.3)
-  sky.addColorStop(0, '#1d2740')
-  sky.addColorStop(1, '#4a5a7c')
-  g.fillStyle = sky
-  g.fillRect(0, 0, w, h)
-  // the brick facade across Chestnut: warm red-brown, lit windows
-  g.fillStyle = '#4a2519'
-  g.fillRect(0, h * 0.14, w, h * 0.62)
-  for (let row = 0; row < 4; row++)
-    for (let col = 0; col < 5; col++) {
-      const x = 4 + col * 19
-      const y = h * 0.18 + row * 22
-      const lit = rnd()
-      g.fillStyle = lit > 0.68 ? `rgba(255,${170 + Math.round(rnd() * 40)},${90 + Math.round(rnd() * 40)},${0.55 + rnd() * 0.4})` : 'rgba(30,26,34,0.9)'
-      g.fillRect(x, y, 10, 15)
-    }
-  // street level: shopfront glow, a street lamp, parked cars
-  const shop = g.createLinearGradient(0, h * 0.62, 0, h * 0.78)
-  shop.addColorStop(0, 'rgba(255,190,110,0.0)')
-  shop.addColorStop(1, 'rgba(255,190,110,0.55)')
-  g.fillStyle = shop
-  g.fillRect(0, h * 0.62, w, h * 0.16)
-  g.fillStyle = '#16121a'
-  g.fillRect(0, h * 0.76, w, h * 0.24)
-  const lamp = g.createRadialGradient(w * 0.7, h * 0.46, 0, w * 0.7, h * 0.46, 26)
-  lamp.addColorStop(0, 'rgba(255,214,150,1)')
-  lamp.addColorStop(0.25, 'rgba(255,170,80,0.5)')
-  lamp.addColorStop(1, 'rgba(255,170,80,0)')
-  g.fillStyle = lamp
-  g.fillRect(0, 0, w, h)
-  // cars: a pale one and an orange one (the photo), tail lights
-  g.fillStyle = 'rgba(200,200,210,0.75)'
-  g.fillRect(w * 0.52, h * 0.79, w * 0.46, h * 0.06)
-  g.fillStyle = 'rgba(210,110,60,0.8)'
-  g.fillRect(w * 0.02, h * 0.8, w * 0.34, h * 0.055)
-  g.fillStyle = 'rgba(255,40,30,0.9)'
-  g.fillRect(w * 0.33, h * 0.815, 3, 2)
-  // the railing
-  g.fillStyle = 'rgba(8,6,8,0.9)'
-  for (let x = 0; x < w; x += 3) g.fillRect(x, h * 0.86, 1, h * 0.08)
-  g.fillRect(0, h * 0.86, w, 1.5)
-  const t = new THREE.CanvasTexture(cv)
-  t.colorSpace = THREE.SRGBColorSpace
-  return t
-}
-
 /** A cream coaster printed with the red-ring "G" roundel (the site icon), drawn crisp. */
-function roundelCoaster(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; tex: THREE.CanvasTexture } {
+function roundelCoaster(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; edge: THREE.MeshStandardMaterial; tex: THREE.CanvasTexture } {
   const n = 512
   const cv = document.createElement('canvas')
   cv.width = cv.height = n
@@ -126,48 +92,120 @@ function roundelCoaster(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; 
   face.position.y = 0.035
   face.receiveShadow = true
   mesh.add(face)
-  return { mesh, mat, tex }
+  return { mesh, mat, edge, tex }
 }
 
 export interface HeroSet {
   group: THREE.Group
-  /** the turntable's anchor (DECK_ANCHOR) */
+  /** the deck's mount on the hi-fi (the room kit's turntable seat) */
   deck: THREE.Group
   tt: Turntable
   record: Record
+  /** the house sleeve leaning on the back counter beside the hi-fi */
   sleeve: Sleeve
   faucet: ReturnType<typeof makeFaucet>
   coaster: THREE.Mesh
+  /** a warm spot from the sconce side onto the deck (the room's pools light only the kit) */
   wash: THREE.SpotLight
-  windowMat: THREE.MeshBasicMaterial
+  /** the room kit pieces: the back bar, the long bar, the ceiling */
+  backBar: RoomKit
+  bar: RoomKit
+  ceiling: RoomKit
+  /** 0..1.5 every bulb and its light pools (drive it; never toggle) */
+  setGlow(k: number): void
+  /** 0..2 the kit's warm bounce */
+  setAmbient(k: number): void
   dispose(): void
 }
 
-export function buildSet(mobile: boolean): HeroSet {
+export async function buildSet(mobile: boolean): Promise<HeroSet> {
   const group = new THREE.Group()
   const disposables: { dispose(): void }[] = []
 
-  // THE BAR: a long oiled top and a dark panelled front
-  // the top runs back to the brick (the deck and a sleeve stand at the back)
-  const barBack = SET.wallZ + 0.02
-  const bar = makeBarTop({ length: 22, depth: 1.7 - barBack, thickness: 0.14 })
-  bar.position.set(1, 0, (1.7 + barBack) / 2)
-  group.add(bar)
-  const { map } = woodMaps()
-  const front = new THREE.Mesh(
-    new THREE.BoxGeometry(22, 3.6, 0.2),
-    new THREE.MeshStandardMaterial({ map, color: '#5a3a28', roughness: 0.6 }),
-  )
-  front.position.set(1, -1.94, 1.62)
-  front.receiveShadow = true
-  group.add(front)
-  // a brass foot rail's worth of glint along the front edge of the top
-  const nosing = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 22, 16, 1), new THREE.MeshPhysicalMaterial({ map, color: '#7a4a2c', roughness: 0.35, clearcoat: 0.6 }))
-  nosing.rotation.z = Math.PI / 2
-  nosing.position.set(1, -0.07, 1.72)
-  group.add(nosing)
+  // the room kit's maps, built across frames (no long task); its makers are then quick
+  await prepareRoom({ backBar: {} })
 
-  // THE TAP COLUMN: brushed stainless, one faucet facing the room
+  // ── THE BACK BAR (ref1): the room kit, across the aisle ──
+  // the record's own sleeve, red like the LP standing by the real hi-fi (ref1), a Glory typographic cover
+  const houseSleeve = coverTexture({ title: BRAND.short, sub: BRAND.motto, kicker: `${BRAND.neighborhood} · Philadelphia`, cat: catNo(1), paper: 'red' })
+  const backBar = makeBackBar({
+    scale: K,
+    brick: 'old1837',
+    records: { rows: 1, singles: 0.42 },
+    hifi: true,
+    // the walnut deck goes on the hi-fi below (the kit's own is a black one)
+    turntable: false,
+    // the house sleeve stands beside the hi-fi, posed by the kit's leanOnWall (never clipped)
+    sleeve: houseSleeve,
+    tv: false,
+    ceiling: false,
+    mobile,
+    ambient: 0.3,
+  })
+  backBar.group.position.set(ROOM.x, ROOM.floorY, ROOM.wallZ)
+  group.add(backBar.group)
+  // this instance's brick: a touch redder (ref2's old Philadelphia brick reads red-brown behind the pour)
+  backBar.group.traverse(o => {
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
+    if ((o as THREE.Mesh).isMesh && m && !Array.isArray(m) && m.bumpScale === 3.2 && m.map) m.color.setRGB(1.14, 0.9, 0.8)
+  })
+  disposables.push(backBar, houseSleeve)
+
+  // ── THE DECK on the hi-fi ──
+  const deck = new THREE.Group()
+  deck.name = 'hero-deck'
+  deck.position.copy(backBar.anchors.turntable)
+  deck.scale.setScalar(0.315)
+  backBar.group.add(deck)
+  const tt = makeTurntable({ finish: 'walnut', shadows: false, contact: false })
+  const record = makeRecord({ label: { title: 'This Must Be the Place', sub: BRAND.name, side: 'SIDE A', cat: catNo(1), paper: 'red' } })
+  tt.setRecord(record)
+  deck.add(tt.group)
+  disposables.push(tt)
+
+  // ── THE LONG BAR: oiled top, black rubber rail on the bartender's side, planked front ──
+  const L = 6.2
+  const bar = makeBarRun({ scale: K, length: L, depth: ROOM.barDepth, height: 1.07, mobile })
+  bar.group.position.set(0.4, ROOM.floorY, ROOM.barEdgeZ - (ROOM.barDepth / 2) * K)
+  group.add(bar.group)
+  disposables.push(bar)
+  // the kit tiles the top's grain once per 3.2 m; the hero films it from a few cm: re-tile it
+  // (a tile per 0.8 m along the grain, ~9 cm boards across) so the planks stay crisp up close
+  bar.group.traverse(o => {
+    const m = o as THREE.Mesh
+    const p = (m.geometry as THREE.BoxGeometry | undefined)?.parameters
+    if (!m.isMesh || !p || Math.abs(p.width - L) > 1e-6 || Math.abs(p.depth - ROOM.barDepth) > 1e-6) return
+    const uv = m.geometry.attributes.uv as THREE.BufferAttribute
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 4, uv.getY(i) * 2.2)
+    uv.needsUpdate = true
+    m.receiveShadow = true
+    // oiled honey oak as at the bar, a touch less orange than the kit's lift under the hero's tungsten key
+    ;(m.material as THREE.MeshPhysicalMaterial).color.setRGB(1.42, 1.36, 1.38)
+  })
+
+  // ── THE CEILING: black paint, joists, a galvanized duct trunk along the bulkhead, a wire-cage
+  // pendant over the pour (its bulb ~0.6 m over the bar, just behind the tap post) ──
+  const kx = (x: number) => x / K
+  const kz = (z: number) => (z - ROOM.wallZ) / K
+  const ceiling = makeCeiling({
+    scale: K,
+    width: 9,
+    depth: kz(ROOM.barEdgeZ + 14),
+    height: 3.45,
+    mobile,
+    // ref1: a long galvanized trunk tight under the black ceiling, along the back bar's bulkhead
+    ducts: [{ pts: [new THREE.Vector3(-4.5, 0, 0.9), new THREE.Vector3(4.5, 0, 0.9)], shape: 'rect', size: [0.6, 0.32] }],
+    pendants: [
+      { x: kx(SET.pour.x + 0.6), z: kz(SET.tower.z - 1.6), drop: 1.3 },
+      { x: kx(SET.pour.x - 30), z: kz(SET.tower.z - 1.2), drop: 1.25 },
+      { x: kx(SET.pour.x + 34), z: kz(SET.tower.z - 1.4), drop: 1.3 },
+    ],
+  })
+  ceiling.group.position.set(0, ROOM.floorY, ROOM.wallZ)
+  group.add(ceiling.group)
+  disposables.push(ceiling)
+
+  // ── THE TAP POST: brushed stainless, one faucet facing the room ──
   const steel = stainless({ roughness: 0.3, color: '#767b80' })
   disposables.push(steel)
   const colH = SET.faucetY + 0.55
@@ -176,13 +214,13 @@ export function buildSet(mobile: boolean): HeroSet {
   column.castShadow = true
   column.receiveShadow = true
   group.add(column)
-  const capGeo = new THREE.SphereGeometry(SET.towerR, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2)
-  const cap = new THREE.Mesh(capGeo, steel)
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(SET.towerR, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2), steel)
   cap.position.set(SET.tower.x, colH, SET.tower.z)
   group.add(cap)
   const foot = new THREE.Mesh(new THREE.CylinderGeometry(SET.towerR * 1.6, SET.towerR * 1.7, 0.08, 48), steel)
   foot.position.set(SET.tower.x, 0.04, SET.tower.z)
   group.add(foot)
+  disposables.push(column.geometry, cap.geometry, foot.geometry)
   const faucet = makeFaucet({ scale: SET.glassScale })
   faucet.group.position.set(SET.tower.x, SET.faucetY, SET.tower.z + SET.towerR - 0.02)
   group.add(faucet.group)
@@ -191,108 +229,41 @@ export function buildSet(mobile: boolean): HeroSet {
   tray.position.set(SET.pour.x, SET.pour.y, SET.pour.z + 0.05)
   group.add(tray)
 
-  // THE COASTER
-  const { mesh: coaster } = roundelCoaster()
-  coaster.position.copy(SET.coaster)
-  coaster.rotation.y = -0.35
-  group.add(coaster)
+  // ── THE COASTER ──
+  const co = roundelCoaster()
+  co.mesh.position.copy(SET.coaster)
+  co.mesh.rotation.y = -0.35
+  group.add(co.mesh)
+  disposables.push(co.mat, co.edge, co.tex, co.mesh.geometry)
 
-  // the windows: two tall black-framed sashes, 3 × 6 panes each
-  const winX = [1.6, 4.9]
-  const winW = 2.7
-  const winY0 = 0.7
-  const winH = 6.2
-  const street = streetTexture()
-  const windowMat = new THREE.MeshBasicMaterial({ map: street, color: new THREE.Color(1, 1, 1).multiplyScalar(0.62), toneMapped: true, fog: false })
-  const frameGeos: THREE.BufferGeometry[] = []
-  const box = (w: number, h: number, d: number, x: number, y: number, z: number) => {
-    const b = new THREE.BoxGeometry(w, h, d)
-    b.translate(x, y, z)
-    frameGeos.push(b)
-  }
-  for (const cx of winX) {
-    const glazing = new THREE.Mesh(new THREE.PlaneGeometry(winW, winH), windowMat)
-    glazing.position.set(cx, winY0 + winH / 2, SET.wallZ - 0.12)
-    group.add(glazing)
-    // deep reveal + heavy frame (black paint), mullions
-    const z = SET.wallZ + 0.03
-    box(winW + 0.5, 0.26, 0.3, cx, winY0 - 0.08, z)
-    box(winW + 0.5, 0.3, 0.3, cx, winY0 + winH + 0.1, z)
-    box(0.26, winH + 0.5, 0.3, cx - winW / 2 - 0.08, winY0 + winH / 2, z)
-    box(0.26, winH + 0.5, 0.3, cx + winW / 2 + 0.08, winY0 + winH / 2, z)
-    for (let i = 1; i < 3; i++) box(0.06, winH, 0.08, cx - winW / 2 + (winW * i) / 3, winY0 + winH / 2, SET.wallZ - 0.06)
-    for (let j = 1; j < 6; j++) box(winW, j === 3 ? 0.16 : 0.06, j === 3 ? 0.14 : 0.08, cx, winY0 + (winH * j) / 6, SET.wallZ - 0.06)
-  }
-  // the dark pier between/around the windows (the photo's black-painted wood)
-  box(0.9, winH + 1.2, 0.2, (winX[0] + winX[1]) / 2, winY0 + winH / 2, SET.wallZ - 0.02)
-  const frameMat = new THREE.MeshStandardMaterial({ color: '#0b0908', roughness: 0.55, envMapIntensity: 0.6 })
-  const frames = new THREE.Mesh(mergeGeometries(frameGeos), frameMat)
-  frames.receiveShadow = true
-  group.add(frames)
-  for (const g of frameGeos) g.dispose()
-  // the brick, in panels around the window openings (UVs from world x/y so
-  // the courses run straight through)
-  const panel = (x0: number, x1: number, y0: number, y1: number) => {
-    const m = makeBrickWall(x1 - x0, y1 - y0, { bump: 1.1, tint: '#b99a8a' })
-    const cx = (x0 + x1) / 2
-    const cy = (y0 + y1) / 2
-    const pos = m.geometry.attributes.position as THREE.BufferAttribute
-    const uv = m.geometry.attributes.uv as THREE.BufferAttribute
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, (pos.getX(i) + cx) / 2.4, (pos.getY(i) + cy) / 2.4)
-    m.position.set(cx, cy, SET.wallZ)
-    group.add(m)
-  }
-  const ox0 = winX[0] - winW / 2 - 0.2
-  const ox1 = winX[1] + winW / 2 + 0.2
-  panel(-22, ox0, -5, 11.5)
-  panel(ox1, 16, -5, 11.5)
-  panel(ox0, ox1, winY0 + winH + 0.2, 11.5)
-  panel(ox0, ox1, -5, winY0 - 0.2)
-
-  // a warm grazing wash down the brick (a sconce above the frame): no shadows
-  const wash = new THREE.SpotLight('#ffb070', 0, 18, 0.7, 0.9, 1.4)
-  wash.position.set(-3.5, 9.5, SET.wallZ + 1.6)
-  wash.target.position.set(-3, 1.5, SET.wallZ)
+  // a warm spot from the sconce's side onto the deck and the hi-fi (no shadows)
+  const wash = new THREE.SpotLight('#ffb070', 0, 0, 0.32, 0.85, 2)
+  const at = backBar.worldAnchor('turntable')
+  wash.position.set(at.x + 6, at.y + 16, at.z + 7)
+  wash.target.position.copy(at)
   group.add(wash, wash.target)
 
-  // THE DECK: a walnut turntable spinning the red-label Glory record
-  const deck = new THREE.Group()
-  deck.name = 'hero-deck'
-  deck.position.copy(DECK_ANCHOR.position)
-  deck.rotation.y = DECK_ANCHOR.rotationY
-  deck.scale.setScalar(DECK_ANCHOR.scale)
-  group.add(deck)
-  const tt = makeTurntable({ finish: 'walnut' })
-  const record = makeRecord({ label: { title: 'This Must Be the Place', sub: BRAND.name, side: 'SIDE A', cat: catNo(1), paper: 'red' } })
-  tt.setRecord(record)
-  deck.add(tt.group)
-  disposables.push(tt)
-  // its sleeve, leaning on the brick behind (the wall sign photo, the house cover)
-  const sleeve = makeSleeve({
-    front: coverTexture({ title: BRAND.short, sub: BRAND.motto, kicker: 'Glory Records', cat: catNo(1), photoUrl: 'photos/wall-sign.webp', focus: [0.3, 0.3] }),
-  })
-  sleeve.group.scale.setScalar(DECK_ANCHOR.scale)
-  sleeve.group.position.set(-4.9, 0, SET.wallZ + 0.5)
-  sleeve.group.rotation.set(-0.11, 0.06, 0)
-  group.add(sleeve.group)
-
-  void mobile
+  const kits = [backBar, bar, ceiling]
   return {
     group,
     deck,
     tt,
     record,
-    sleeve,
+    sleeve: backBar.sleeves[0],
     faucet,
-    coaster,
+    coaster: co.mesh,
     wash,
-    windowMat,
+    backBar,
+    bar,
+    ceiling,
+    setGlow(k) {
+      for (const kit of kits) kit.setGlow(k)
+    },
+    setAmbient(k) {
+      for (const kit of kits) kit.setAmbient(k)
+    },
     dispose() {
       for (const d of disposables) d.dispose()
-      street.dispose()
-      windowMat.dispose()
-      frameMat.dispose()
-      frames.geometry.dispose()
     },
   }
 }

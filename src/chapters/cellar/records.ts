@@ -30,6 +30,11 @@ import {
 export const SINGLE_SCALE = 1.45
 /** the height a single reaches on its easel with the record out (world units) */
 export const SINGLE_TOP = (SEVEN / 2 + 0.44 + 0.283) * SINGLE_SCALE
+/** the easel: the sleeve's lean back, its board thickness (a thin 7"), the backrest bar's depth and its gap behind the sleeve */
+export const EASEL_LEAN = 0.2
+export const SINGLE_T = 0.0125 * SEVEN
+export const STRUT_D = 0.014
+export const STRUT_GAP = 0.006
 
 const PAPERS: PaperName[] = ['cream', 'red', 'amber']
 const LABEL_PAPERS: PaperName[] = ['red', 'cream', 'stout', 'amber', 'bone', 'stout', 'cream']
@@ -63,24 +68,38 @@ export interface Single {
 export function makeSingle(art: SinglesArt, steel: THREE.Material): Single {
   const group = new THREE.Group()
   group.scale.setScalar(SINGLE_SCALE)
-  // the easel: a ledge with a lip, a back strut
+  // the easel: a ledge with a lip; the sleeve leans back on a flat backrest
+  // bar that tips with it, 6 mm (kit units) behind its back face — so neither
+  // the bar nor the ledge ever passes through the sleeve or the record in it
   const ledge = new THREE.Mesh(new THREE.BoxGeometry(SEVEN * 1.08, 0.022, 0.1), steel)
   ledge.position.set(0, 0.011, 0.02)
   const lip = new THREE.Mesh(new THREE.BoxGeometry(SEVEN * 1.08, 0.05, 0.012), steel)
   lip.position.set(0, 0.03, 0.068)
-  const strut = new THREE.Mesh(new THREE.BoxGeometry(0.03, SEVEN * 0.8, 0.018), steel)
-  strut.position.set(0, SEVEN * 0.36, -0.1)
-  strut.rotation.x = 0.28
+  const lean = EASEL_LEAN
+  const t = SINGLE_T
+  const frame = new THREE.Group()
+  // the sleeve's pivot is its bottom-centre edge: lift it so the back corner stays on the ledge
+  frame.position.set(0, 0.022 + (t / 2) * Math.sin(lean) + 0.0008, 0.03)
+  frame.rotation.x = -lean
+  const strutH = SEVEN * 0.62
+  const strut = new THREE.Mesh(new THREE.BoxGeometry(0.03, strutH, STRUT_D), steel)
+  strut.position.set(0, 0.012 + strutH / 2, -t / 2 - STRUT_GAP - STRUT_D / 2)
+  frame.add(strut)
+  frame.name = 'easel-frame'
+  strut.name = 'easel-strut'
+  ledge.name = 'easel-ledge'
+  lip.name = 'easel-lip'
   for (const m of [ledge, lip, strut]) {
     m.castShadow = true
     m.receiveShadow = true
-    group.add(m)
+    if (m !== strut) group.add(m)
   }
+  group.add(frame)
   const sleeve = makeSleeve({ size: 7, thin: true, hole: 0.235, front: art.sleeves[0], back: art.sleeves[0], seed: 3 })
-  sleeve.group.position.set(0, 0.022, 0.03)
-  sleeve.group.rotation.x = -0.2
-  group.add(sleeve.group)
+  sleeve.group.name = 'easel-sleeve'
+  frame.add(sleeve.group)
   const record = makeRecord({ size: 7, label: art.labels[0], segments: 96 })
+  record.group.name = 'easel-record'
   sleeve.group.add(record.group)
   let shown = -1
   return {

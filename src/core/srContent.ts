@@ -1,6 +1,7 @@
 import {
-  BAR, BOTTLES, BRAND, CITY_WIDE, COCKTAILS, CREDIT, DRAFTS, EVENTS, HOURS, KITCHEN_HOURS, LINKS, MENU, PEOPLE, RESERVATIONS, SECTIONS, SOCIALS, WINE, eventInquiryHref,
+  BAR, BOTTLES, BRAND, CITY_WIDE, COCKTAILS, CREDIT, DRAFTS, EVENTS, HOURS, KITCHEN_HOURS, LINKS, MENU, PEOPLE, RESERVATIONS, SECTIONS, SOCIALS, WINE,
 } from '../content'
+import { createEventForm } from '../ui/eventForm'
 
 /*
  * The accessible layer. Each chapter's copy, as plain linear semantic HTML,
@@ -81,13 +82,15 @@ const COPY: Record<string, () => string> = {
     <h2 tabindex="0">${esc(SECTIONS.people.title)}</h2>
     ${PEOPLE.map((p, i) => `<h3>${stop('people', i, `${p.name}, ${p.role}`)}</h3>${p.bio.map(b => `<p>${esc(b)}</p>`).join('')}`).join('')}`,
 
+  // the Event Inquiry Form is a real form (src/ui/eventForm.ts): the mount is filled in
+  // buildChapterCopy; the events chapter docks it over the scene (anchor 1), the
+  // fallback shows it inline. Its last line is the note for parties of more than 10.
   events: () => `
     <p>${esc(SECTIONS.events.eyebrow)}</p>
     <h2 tabindex="0">${esc(EVENTS.title)}</h2>
     ${EVENTS.body.map((b, i) => (i === 0 ? `<p>${stop('events', 0, b)}</p>` : `<p>${esc(b)}</p>`)).join('')}
-    <p><a href="${esc(eventInquiryHref())}" data-anchor="1">${esc(EVENTS.cta)}: email ${esc(EVENTS.email)}</a></p>
-    <p>${esc(RESERVATIONS.large)}</p>
-    <p>${ext(LINKS.events.url, LINKS.events.label)}</p>`,
+    <p>${ext(LINKS.events.url, LINKS.events.label)}</p>
+    <div class="event-form-mount" data-event-form data-anchor="1"></div>`,
 
   visit: () => `
     <p>${esc(SECTIONS.visit.eyebrow)}</p>
@@ -112,6 +115,7 @@ export function buildChapterCopy(id: string, visible = false): HTMLElement | nul
   const div = document.createElement('div')
   div.className = visible ? 'fallback-copy' : 'sr-copy'
   div.innerHTML = html()
+  div.querySelectorAll<HTMLElement>('[data-event-form]').forEach(m => m.append(createEventForm()))
   // in-page links drive the story instead of jumping to an empty section
   div.querySelectorAll<HTMLAnchorElement>('a[data-land]').forEach(a =>
     a.addEventListener('click', e => {

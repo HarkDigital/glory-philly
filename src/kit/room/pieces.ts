@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { onFonts, type Sleeve } from '../vinyl'
-import { poolHook, withPools, type RoomMaterials } from './materials'
+import { kitPools, poolHook, withPools, type RoomMaterials } from './materials'
 import { brickPanelMaps, drawChalk, hifiMaps, pitchTexture, SPINES, COVERS, type ChalkSpec, type PaintLine } from './textures'
 import { RoomBuilder, canvas, clamp, lerp, plankBox, texFrom, type Rng } from './util'
 
@@ -69,7 +69,7 @@ export function addShelf(c: Ctx, w: number, d: number, { x = 0, y = 0, z = 0, th
 export function addBrickPanel(c: Ctx, w: number, h: number, { x = 0, y = 0, z = 0, lines = [] as PaintLine[], seed = 3, soot = 0.5 } = {}) {
   // maps are cached by their arguments (prepareRoom() can build them ahead, across frames)
   const { map, data } = brickPanelMaps(w, h, { lines, seed, soot })
-  const mat = withPools(
+  const mat = kitPools(
     new THREE.MeshStandardMaterial({ map, roughnessMap: data, bumpMap: data, bumpScale: 3.2, roughness: 1, envMapIntensity: 0.35 }),
     c.M.pools,
     'brick',
@@ -653,10 +653,10 @@ function addBulb(c: Ctx, { halo = 0.2, pool = 3.2, power = 1, cage = true } = {}
   const centre = c.b.at(0, 0.075, 0)
   const s = new THREE.Vector3().setFromMatrixScale(c.b.m).x
   c.b.instance('glow', glowGeo, c.M.glow, new THREE.Matrix4().makeTranslation(0, 0.075, 0).multiply(new THREE.Matrix4().makeScale(halo / s, halo / s, halo / s)), {
-    color: new THREE.Color(1, 0.6, 0.28).multiplyScalar(power),
+    color: new THREE.Color(1, 0.52, 0.2).multiplyScalar(power),
     order: 4,
   })
-  c.M.pools.add(centre, pool, '#ffe4c8', 0.8 * power)
+  c.M.pools.add(centre, pool, '#ffdcb6', 0.8 * power)
   return centre
 }
 
@@ -760,6 +760,124 @@ export function addDuct(c: Ctx, pts: THREE.Vector3[], { radius = 0.2, ceilingY =
   return len
 }
 
+/** a box with UVs in metres / tile on every face (u along the box's z, its length) */
+function metreBox(w: number, h: number, l: number, tile: number, ou = 0) {
+  const g = new THREE.BoxGeometry(w, h, l)
+  const pos = g.attributes.position as THREE.BufferAttribute
+  const nrm = g.attributes.normal as THREE.BufferAttribute
+  const uv = g.attributes.uv as THREE.BufferAttribute
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i)
+    const y = pos.getY(i)
+    const z = pos.getZ(i)
+    if (Math.abs(nrm.getZ(i)) > 0.5) uv.setXY(i, x / tile + ou, y / tile)
+    else if (Math.abs(nrm.getY(i)) > 0.5) uv.setXY(i, z / tile + ou, x / tile + 0.37)
+    else uv.setXY(i, z / tile + ou, y / tile + 0.71)
+  }
+  return g
+}
+
+/**
+ * ref1's duct: a long, straight, RECTANGULAR galvanized trunk tight under the
+ * black ceiling — straight sections along the pts (their xz; the top keeps
+ * `gap` under `ceilingY`, or follows the pts' y without a ceiling), a collar
+ * at each turn, transverse joint flanges every ~1.2 m, black U-straps up to
+ * the ceiling beside each flange, end flanges, and a black conduit run along
+ * its room-side top edge. Returns the trunk's length.
+ */
+export function addDuctTrunk(
+  c: Ctx,
+  pts: THREE.Vector3[],
+  { width = 0.6, height = 0.32, ceilingY = null as number | null, gap = 0.03, joint = 1.2, conduit = true } = {},
+) {
+  const tile = 0.6
+  const yTop = (p: THREE.Vector3) => (ceilingY != null ? ceilingY - gap : p.y + height / 2)
+  // sheet-metal runs are straight: drop interior points that turn the run by < 8°
+  const keep: THREE.Vector3[] = [pts[0]]
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const a = keep[keep.length - 1]
+    const h0 = Math.atan2(pts[i].x - a.x, pts[i].z - a.z)
+    const h1 = Math.atan2(pts[i + 1].x - pts[i].x, pts[i + 1].z - pts[i].z)
+    const d = Math.abs(Math.atan2(Math.sin(h1 - h0), Math.cos(h1 - h0)))
+    if (d > 0.14) keep.push(pts[i])
+  }
+  if (pts.length > 1) keep.push(pts[pts.length - 1])
+  const P = keep.map(p => new THREE.Vector3(p.x, yTop(p) - height / 2, p.z))
+  let total = 0
+  const flange = (x: number, y: number, z: number, yaw: number, grow = 0.03) => {
+    c.b.merge(metreBox(width + grow, height + grow, 0.035, tile, c.r()), c.M.galv, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, 1, 1)))
+  }
+  const strap = (x: number, y: number, z: number, yaw: number) => {
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+    const up = ceilingY != null ? ceilingY - (y - height / 2) + 0.003 : height + 0.03
+    const yc = y - height / 2 - 0.003 + up / 2
+    for (const s of [-1, 1]) {
+      const off = new THREE.Vector3(s * (width / 2 + 0.002), 0, 0).applyQuaternion(q)
+      c.b.merge(new THREE.BoxGeometry(0.003, up, 0.026), c.M.steel, new THREE.Matrix4().compose(new THREE.Vector3(x + off.x, yc, z + off.z), q, new THREE.Vector3(1, 1, 1)))
+    }
+    c.b.merge(new THREE.BoxGeometry(width + 0.007, 0.003, 0.026), c.M.steel, new THREE.Matrix4().compose(new THREE.Vector3(x, y - height / 2 - 0.0015, z), q, new THREE.Vector3(1, 1, 1)))
+  }
+  for (let i = 0; i + 1 < P.length; i++) {
+    const a = P[i]
+    const b = P[i + 1]
+    const dx = b.x - a.x
+    const dz = b.z - a.z
+    const L = Math.hypot(dx, dz)
+    if (L < 1e-3) continue
+    const yaw = Math.atan2(dx, dz)
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+    // interior ends run into the turn's collar
+    const e0 = i > 0 ? width / 2 - 0.01 : 0
+    const e1 = i + 2 < P.length ? width / 2 - 0.01 : 0
+    const len = L + e0 + e1
+    const mid = new THREE.Vector3((a.x + b.x) / 2, a.y, (a.z + b.z) / 2).addScaledVector(new THREE.Vector3(dx / L, 0, dz / L), (e1 - e0) / 2)
+    c.b.merge(metreBox(width, height, len, tile, c.r() * 5), c.M.galv, new THREE.Matrix4().compose(mid, q, new THREE.Vector3(1, 1, 1)))
+    // joint flanges + straps along the section
+    const n = Math.max(1, Math.round(L / joint))
+    for (let k = 1; k < n; k++) {
+      const t = k / n
+      const x = a.x + dx * t
+      const z = a.z + dz * t
+      flange(x, a.y, z, yaw)
+      const so = 0.22
+      strap(x + (dx / L) * so, a.y, z + (dz / L) * so, yaw)
+    }
+    if (n === 1) strap(a.x + dx * 0.5, a.y, a.z + dz * 0.5, yaw)
+    // the conduit: a black pipe along the room-side top edge, clipped every ~0.8 m
+    if (conduit) {
+      let nx = -dz / L
+      let nz = dx / L
+      if (nz < -1e-6 || (Math.abs(nz) < 1e-6 && nx < 0)) {
+        nx = -nx
+        nz = -nz
+      }
+      const rr = 0.011
+      const ox = nx * (width / 2 + rr + 0.004)
+      const oz = nz * (width / 2 + rr + 0.004)
+      const cy = a.y + height / 2 - 0.035
+      const pipe = new THREE.CylinderGeometry(rr, rr, len + (i + 2 < P.length ? width : 0), 10)
+      pipe.rotateX(Math.PI / 2)
+      c.b.merge(pipe, c.M.steel, new THREE.Matrix4().compose(new THREE.Vector3(mid.x + ox, cy, mid.z + oz), q, new THREE.Vector3(1, 1, 1)))
+      const nc = Math.max(1, Math.floor(L / 0.8))
+      for (let k = 0; k <= nc; k++) {
+        const t = (k + 0.5) / (nc + 1)
+        c.b.merge(new THREE.BoxGeometry(rr * 2.6, rr * 2.6, 0.018), c.M.steel, new THREE.Matrix4().compose(new THREE.Vector3(a.x + dx * t + ox * 0.94, cy, a.z + dz * t + oz * 0.94), q, new THREE.Vector3(1, 1, 1)))
+      }
+    }
+    // end flanges on the open ends
+    if (i === 0) flange(a.x, a.y, a.z, yaw, 0.024)
+    if (i + 2 === P.length) flange(b.x, b.y, b.z, yaw, 0.024)
+    total += L
+  }
+  // a collar at each turn (a touch bigger, so its faces never fight the sections')
+  for (let i = 1; i + 1 < P.length; i++) {
+    const a = P[i - 1]
+    const yaw = Math.atan2(P[i].x - a.x, P[i].z - a.z)
+    c.b.merge(metreBox(width + 0.012, height + 0.012, width + 0.012, tile, c.r()), c.M.galv, new THREE.Matrix4().compose(P[i], new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, 1, 1)))
+  }
+  return total
+}
+
 // ─── chalkboards ────────────────────────────────────────────────────────────
 
 /**
@@ -778,7 +896,7 @@ export function addChalkboard(c: Ctx, w: number, h: number, spec: ChalkSpec, { x
   }
   draw()
   onFonts(draw)
-  const mat = withPools(new THREE.MeshStandardMaterial({ map, roughness: 0.92, envMapIntensity: 0.25 }), c.M.pools, 'chalk')
+  const mat = kitPools(new THREE.MeshStandardMaterial({ map, roughness: 0.92, envMapIntensity: 0.25 }), c.M.pools, 'chalk')
   c.owned.push(map, mat)
   const f = 0.045
   c.b.merge(new THREE.PlaneGeometry(w, h), mat, T(x, y + h / 2, z + 0.012))
@@ -798,7 +916,7 @@ export function addHifi(c: Ctx, { x = 0, y = 0, z = 0, d = 0.33 } = {}) {
   const hm = hifiMaps()
   let mat = c.M.list.find(m => m.name === 'room-hifi') as THREE.MeshStandardMaterial | undefined
   if (!mat) {
-    mat = withPools(
+    mat = kitPools(
       new THREE.MeshStandardMaterial({ map: hm.map, emissiveMap: hm.emissive, emissive: new THREE.Color(1, 1, 1), emissiveIntensity: 2.4, roughness: 0.42, metalness: 0.5 }),
       c.M.pools,
       'hifi',

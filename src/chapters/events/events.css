@@ -57,139 +57,16 @@
   color: var(--amber-hot);
 }
 
-/* ---- the inquiry: a printed card, cream stock, ink type, a red G stamp ---- */
-.ev .ev-card-wrap {
-  position: absolute;
-  right: calc(var(--gutter) + 2vw);
-  top: calc(var(--safe-top) + (100vh - var(--safe-top) - var(--safe-bottom)) / 2);
-  width: min(500px, 42vw);
-  transform: translateY(-50%);
-}
-.ev .ev-card {
-  --fg: #140c08;
-  position: relative;
-  color: #140c08;
-  background: #f3ead8;
-  background-image:
-    radial-gradient(120% 90% at 30% 0%, rgba(255, 250, 240, 0.9), rgba(255, 250, 240, 0) 60%),
-    linear-gradient(180deg, #f5eddc, #ede2cc);
-  padding: 30px 32px 26px;
-  border-radius: 3px;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.6) inset,
-    0 2px 3px rgba(0, 0, 0, 0.35),
-    0 30px 70px rgba(0, 0, 0, 0.6);
-  transform: rotate(-1.2deg);
-}
-.ev .ev-card::after {
-  /* a hairline printer's frame inset in the stock */
-  content: '';
-  position: absolute;
-  inset: 9px;
-  border: 1px solid rgba(20, 12, 8, 0.22);
-  border-radius: 2px;
-  pointer-events: none;
-}
-.ev .ev-card-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-.ev .ev-card-brand {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: rgba(20, 12, 8, 0.78);
-  margin: 0 0 8px;
-}
-.ev .ev-card-title {
-  font-family: var(--font-display);
-  font-weight: 400;
-  font-size: clamp(1.7rem, 2.6vw, 2.4rem);
-  line-height: 1;
-  margin: 0;
-  color: #140c08;
-}
-.ev .ev-stamp {
-  flex: none;
-  width: 58px;
-  height: 58px;
-  margin: -6px -4px 0 0;
-  transform: rotate(9deg);
-  opacity: 0.92;
-}
-.ev .ev-fields {
-  list-style: none;
-  margin: 20px 0 6px;
-  padding: 0;
-  display: grid;
-  gap: 0;
-}
-.ev .ev-fields li {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  height: 36px;
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #2a1a12;
-  padding-bottom: 5px;
-  border-bottom: 1px solid rgba(20, 12, 8, 0.4);
-}
-.ev .ev-fields li.is-tall {
-  height: 58px;
-}
-.ev .ev-fields li span:first-child {
-  flex: none;
-}
-.ev .ev-fields li .ev-n {
-  color: #a51a20;
-  font-weight: 600;
-  min-width: 1.6em;
-}
-.ev .ev-req {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  color: rgba(20, 12, 8, 0.78);
-  margin: 10px 0 18px;
-}
-.ev .ev-btns {
-  display: flex;
-  flex-wrap: wrap;
+/* Upcoming Events: a ghost pill under the copy (the stage copy is for mouse/touch;
+   keyboard users reach the same link in the accessible copy) */
+.ev .ev-upcoming {
+  align-self: flex-start;
+  margin-top: 6px;
   gap: 10px;
 }
-.ev .ev-card .hud-btn--ghost {
-  background: transparent;
-  color: #140c08;
-  box-shadow: inset 0 0 0 1.5px rgba(20, 12, 8, 0.7);
-}
-.ev .ev-card .hud-btn--ghost:hover,
-.ev .ev-card .hud-btn--ghost:focus-visible {
-  background: rgba(20, 12, 8, 0.06);
-  box-shadow: inset 0 0 0 1.5px #140c08;
-}
-.ev .ev-card .hud-btn {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 6px 16px rgba(165, 26, 32, 0.25);
-}
-.ev .ev-card .hud-btn.hud-btn--ghost {
-  box-shadow: inset 0 0 0 1.5px rgba(20, 12, 8, 0.7);
-}
-.ev .ev-large {
-  font-family: var(--font-sans);
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: rgba(20, 12, 8, 0.82);
-  margin: 18px 0 0;
-  padding-top: 14px;
-  border-top: 1px dashed rgba(20, 12, 8, 0.35);
+.ev .ev-upcoming .ev-arrow {
+  font-size: 1.05em;
+  line-height: 1;
 }
 
 .ev .ev-probe {
@@ -225,38 +102,8 @@
     line-height: 1.5;
     max-width: 52ch;
   }
-  .ev .ev-card-wrap {
-    left: var(--gutter);
-    right: var(--gutter);
-    width: auto;
-    max-width: 520px;
-    margin: 0 auto;
-  }
-  .ev .ev-card {
-    padding: 24px 22px 20px;
-    transform: rotate(-0.8deg);
-  }
-  .ev .ev-stamp {
-    width: 46px;
-    height: 46px;
-  }
-  .ev .ev-fields {
-    margin-top: 14px;
-  }
-  .ev .ev-fields li {
-    height: 32px;
-    font-size: 11px;
-  }
-  .ev .ev-fields li.is-tall {
-    height: 44px;
-  }
-  .ev .ev-large {
-    font-size: 13px;
-    margin-top: 14px;
-    padding-top: 10px;
-  }
   .ev .hud-btn {
-    padding: 13px 16px;
+    padding: 12px 16px;
     font-size: 11.5px;
   }
 }
@@ -269,25 +116,6 @@
   .ev .ev-body .hud-body {
     font-size: 14px;
     line-height: 1.45;
-  }
-  .ev .ev-card {
-    padding: 18px 18px 16px;
-  }
-  .ev .ev-card-title {
-    font-size: 1.5rem;
-  }
-  .ev .ev-fields li {
-    height: 28px;
-  }
-  .ev .ev-fields li.is-tall {
-    height: 36px;
-  }
-  .ev .ev-req {
-    margin: 8px 0 12px;
-    font-size: 12.5px;
-  }
-  .ev .ev-large {
-    font-size: 12.5px;
   }
 }
 
@@ -313,58 +141,8 @@
     font-size: 13.5px;
     line-height: 1.42;
   }
-  .ev .ev-card-wrap {
-    left: auto;
-    right: var(--gutter);
-    width: min(720px, calc(100vw - 2 * var(--gutter)));
-    max-width: none;
-  }
-  .ev .ev-card {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 22px;
-    padding: 16px 20px 14px;
-  }
-  .ev .ev-card-head {
-    grid-column: 1;
-  }
-  .ev .ev-fields {
-    grid-column: 2;
-    grid-row: 1 / span 4;
-    margin: 0;
-  }
-  .ev .ev-fields li,
-  .ev .ev-fields li.is-tall {
-    height: 26px;
-    font-size: 10.5px;
-  }
-  .ev .ev-req,
-  .ev .ev-btns,
-  .ev .ev-large {
-    grid-column: 1;
-  }
-  .ev .ev-req {
-    margin: 6px 0 8px;
-    font-size: 12px;
-  }
-  .ev .ev-large {
-    font-size: 12px;
-    margin-top: 8px;
-    padding-top: 6px;
-  }
-  .ev .ev-card-title {
-    font-size: 1.4rem;
-  }
-  .ev .ev-stamp {
-    width: 40px;
-    height: 40px;
-  }
   .ev .hud-btn {
     padding: 10px 14px;
     font-size: 10.5px;
   }
-}
-
-.ev .ev-card-fx {
-  will-change: transform, opacity;
 }

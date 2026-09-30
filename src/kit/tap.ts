@@ -22,8 +22,16 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
  *
  * Frame (local units, ~1 = 1 ft): faucets at y = FAUCET_Y, their fronts at
  * z = FAUCET_Z, the stainless manifold behind them at z = MANIFOLD_Z on a
- * black steel backplate. The drip tray top is at y = TRAY_Y. Put a brick
- * wall at z ≈ -0.95 behind it.
+ * black steel backplate. The drip tray top is at y = TRAY_Y. Put the wall
+ * (walnut cladding / brick) at z ≈ -0.945 behind it.
+ *
+ * BAYS: a wall split by clad columns (the real room) passes `bays` — each
+ * bay's taps (first..last) get their own manifold run, backplate and drip
+ * tray, kept inside the bay's clear width [x0, x1] (column face to column
+ * face), so nothing passes into a column:
+ *   makeTapWall({ taps, x, bays: [{ first: 0, last: 18, x0: -7.1, x1: -1.1 }, …] })
+ * Still three draws for the handles/plates/faucets and one each for the
+ * manifolds, backplates, tray bodies and grates, however many bays.
  */
 
 export interface TapSpec {
@@ -58,11 +66,21 @@ const PLATES: [string, string, string][] = [
   ['#f3ead8', '#7a1a14', '#7a1a14'],
 ]
 
+/** a run of taps between two columns: taps first..last, clear width x0..x1 */
+export interface TapBay {
+  first: number
+  last: number
+  x0: number
+  x1: number
+}
+
 export interface TapWall {
   group: THREE.Group
   count: number
   /** x of each tap */
   x: number[]
+  /** the bays (one spanning every tap when none were given) */
+  bays: TapBay[]
   /** redraw the label atlas (await fonts first; call again on document.fonts.ready) */
   drawLabels(): void
   /** 0 rest .. 1 fully open; slightly negative = a spring overshoot backward */
@@ -255,13 +273,12 @@ function drawPlate(g: CanvasRenderingContext2D, x0: number, y0: number, spec: Ta
   g.restore()
 }
 
-export function makeTapWall({ taps, x }: { taps: TapSpec[]; x: number[] }): TapWall {
+export function makeTapWall({ taps, x, bays }: { taps: TapSpec[]; x: number[]; bays?: TapBay[] }): TapWall {
   const count = taps.length
   const group = new THREE.Group()
   group.name = 'tapWall'
   const x0 = Math.min(...x)
   const x1 = Math.max(...x)
-  const span = x1 - x0
 
   // ---- stainless (separate material instances: instanced vs plain meshes)
   const steelOpts = { color: '#e9e6e1', metalness: 1, roughness: 0.17, envMapIntensity: 1.1 }
@@ -279,25 +296,55 @@ export function makeTapWall({ taps, x }: { taps: TapSpec[]; x: number[] }): TapW
   }
   faucets.computeBoundingSphere()
 
-  // manifold: one long stainless tube with end caps, on standoffs
-  const manifold = new THREE.Group()
-  const tubeLen = span + 0.5
-  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.046, tubeLen, 32, 1, false), manifoldMat)
-  tube.rotation.z = Math.PI / 2
-  tube.position.set((x0 + x1) / 2, FAUCET_Y, MANIFOLD_Z)
-  manifold.add(tube)
-  const standGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.16, 12)
-  standGeo.rotateX(Math.PI / 2)
-  for (let k = 0; k <= 6; k++) {
-    const s = new THREE.Mesh(standGeo, manifoldMat)
-    s.position.set(x0 - 0.2 + ((tubeLen - 0.1) * k) / 6, FAUCET_Y, MANIFOLD_Z - 0.1)
-    manifold.add(s)
+  // bays: each bay's taps get their own manifold run, backplate and tray (kept inside x0..x1)
+  const bayList: TapBay[] = bays && bays.length ? bays : [{ first: 0, last: count - 1, x0: x0 - 0.45, x1: x1 + 0.45 }]
+  const tubeGeos: THREE.BufferGeometry[] = []
+  const plateGeos: THREE.BufferGeometry[] = []
+  const trayGeos: THREE.BufferGeometry[] = []
+  const grateGeos: THREE.BufferGeometry[] = []
+  const put = (g: THREE.BufferGeometry, px: number, py: number, pz: number) => {
+    g.translate(px, py, pz)
+    return g.index ? g.toNonIndexed() : g
   }
+  for (const b of bayList) {
+    const bx0 = x[b.first]
+    const bx1 = x[b.last]
+    // manifold: a stainless tube with end caps on standoffs, 0.22 past the end taps (never into a column)
+    const t0 = Math.max(b.x0 + 0.05, bx0 - 0.22)
+    const t1 = Math.min(b.x1 - 0.05, bx1 + 0.22)
+    const tube = new THREE.CylinderGeometry(0.046, 0.046, t1 - t0, 32, 1, false)
+    tube.rotateZ(Math.PI / 2)
+    tubeGeos.push(put(tube, (t0 + t1) / 2, FAUCET_Y, MANIFOLD_Z))
+    const nS = Math.max(2, Math.round((t1 - t0) / 0.9) + 1)
+    for (let k = 0; k < nS; k++) {
+      const st = new THREE.CylinderGeometry(0.022, 0.022, 0.16, 12)
+      st.rotateX(Math.PI / 2)
+      tubeGeos.push(put(st, t0 + 0.1 + ((t1 - t0 - 0.2) * k) / (nS - 1), FAUCET_Y, MANIFOLD_Z - 0.1))
+    }
+    // black steel backplate: fills the bay's clear width
+    const pw = b.x1 - b.x0 - 0.02
+    plateGeos.push(put(new THREE.BoxGeometry(pw, 0.56, 0.03), (b.x0 + b.x1) / 2, FAUCET_Y + 0.02, -0.92))
+    // drip tray: a stainless body with a slotted grate on top (the grate tiles every 0.1 along x)
+    const r0 = Math.max(b.x0 + 0.03, bx0 - 0.22)
+    const r1 = Math.min(b.x1 - 0.03, bx1 + 0.22)
+    trayGeos.push(put(new THREE.BoxGeometry(r1 - r0, TRAY_Y - 0.001, 0.36), (r0 + r1) / 2, (TRAY_Y - 0.001) / 2, FAUCET_Z + 0.02))
+    const gr = new THREE.PlaneGeometry(r1 - r0 - 0.004, 0.356)
+    gr.rotateX(-Math.PI / 2)
+    const uv = gr.attributes.uv as THREE.BufferAttribute
+    for (let k = 0; k < uv.count; k++) uv.setX(k, uv.getX(k) * ((r1 - r0) / 0.1))
+    grateGeos.push(put(gr, (r0 + r1) / 2, TRAY_Y, FAUCET_Z + 0.02))
+  }
+  const merged = (gs: THREE.BufferGeometry[]) => {
+    const g = mergeGeometries(gs, false)!
+    gs.forEach(x => x.dispose())
+    return g
+  }
+  const manifold = new THREE.Mesh(merged(tubeGeos), manifoldMat)
+  manifold.castShadow = true
 
-  // black steel backplate the manifold is mounted on
+  // black steel backplate(s) the manifold is mounted on
   const plateMat = new THREE.MeshStandardMaterial({ color: '#0e0b0a', metalness: 0.55, roughness: 0.42 })
-  const backplate = new THREE.Mesh(new THREE.BoxGeometry(span + 0.9, 0.56, 0.03), plateMat)
-  backplate.position.set((x0 + x1) / 2, FAUCET_Y + 0.02, -0.92)
+  const backplate = new THREE.Mesh(merged(plateGeos), plateMat)
   backplate.receiveShadow = true
 
   // drip tray: stainless with a slotted grate
@@ -312,12 +359,12 @@ export function makeTapWall({ taps, x }: { taps: TapSpec[]; x: number[] }): TapW
   const grateTex = new THREE.CanvasTexture(grate)
   grateTex.colorSpace = THREE.SRGBColorSpace
   grateTex.wrapS = grateTex.wrapT = THREE.RepeatWrapping
-  grateTex.repeat.set((span + 0.5) / 0.1, 1)
   grateTex.anisotropy = 8
   const trayTopMat = new THREE.MeshStandardMaterial({ ...steelOpts, roughness: 0.35, map: grateTex })
-  const tray = new THREE.Mesh(new THREE.BoxGeometry(span + 0.5, TRAY_Y, 0.36), [trayMat, trayMat, trayTopMat, trayMat, trayMat, trayMat])
-  tray.position.set((x0 + x1) / 2, TRAY_Y / 2, FAUCET_Z + 0.02)
+  const tray = new THREE.Mesh(merged(trayGeos), trayMat)
   tray.receiveShadow = true
+  const trayTop = new THREE.Mesh(merged(grateGeos), trayTopMat)
+  trayTop.receiveShadow = true
 
   // ---- handles (instanced, per-instance lacquer)
   const handleMat = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.38, clearcoat: 0.7, clearcoatRoughness: 0.18, envMapIntensity: 0.9 })
@@ -378,7 +425,7 @@ export function makeTapWall({ taps, x }: { taps: TapSpec[]; x: number[] }): TapW
   handles.computeBoundingSphere()
   plates.computeBoundingSphere()
 
-  group.add(backplate, manifold, tray, faucets, handles, plates)
+  group.add(backplate, manifold, tray, trayTop, faucets, handles, plates)
 
   const drawLabels = () => {
     const g = atlas.getContext('2d')!
@@ -394,6 +441,7 @@ export function makeTapWall({ taps, x }: { taps: TapSpec[]; x: number[] }): TapW
     group,
     count,
     x,
+    bays: bayList,
     drawLabels,
     setPull(i, pull) {
       if (Math.abs(pulls[i] - pull) < 1e-4) return

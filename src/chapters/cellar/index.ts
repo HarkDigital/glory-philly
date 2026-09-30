@@ -3,13 +3,13 @@ import type { CameraPose, Chapter, ChapterContext, Frame } from '../../core/type
 import { BRAND } from '../../content'
 import { clamp, ease, lerp, smoothstep } from '../../core/math'
 import { nextFrame } from '../../core/yield'
-import { makeBarTop } from '../../kit/bar'
 import { StoryClock } from '../../kit/pace'
 import { whenRevealed } from '../../kit/images'
 import { GEL } from '../../world/World'
-import { makeBottleWall, LP_X, SECTION_X, WALL_Z, ROW_Y, type BottleWall } from './bottles'
+import { makeBottleWall, planBottles, LOCAL_Y, LP_X, SECTION_X, WALL_Z, ROW_Y, type BottleWall } from './bottles'
+import { K, PAINT_Y, WZ, kx, ky, kz, makeCellarBar, prepareCellarBar, type CellarBar } from './backbar'
 import { makeBottlesLP, makeSingle, singlesArt, SINGLE_TOP, type Single } from './records'
-import { syncVinylLights } from '../../kit/vinyl'
+import { leanAgainst, onFonts, syncVinylLights } from '../../kit/vinyl'
 import { makeWineTower, type WineTower } from './wine'
 import { makeSlot, SPECS, type CocktailSlot } from './cocktails'
 import { CellarHud, layoutOf, type BeatState } from './hud'
@@ -18,10 +18,14 @@ import './cellar.css'
 
 /*
  * THE CELLAR — bottles, wine on tap, specialty cocktails (see timeline.ts for
- * the beat sheet). A product film along Glory's back bar: a backlit wall of
- * bottles the camera tracks shelf by shelf while each group's list reads in
- * a card; then the stainless wine tower pours red, white and rosé; then the
- * seven cocktails slide down the bar one at a time as product shots.
+ * the beat sheet). A product film along Glory's REAL back bar (backbar.ts,
+ * the room kit, Mike's photos): the painted "Old 1837" brick bay and its
+ * walnut shelves (American), the wide walnut bay under a shelf packed with
+ * LPs (International), the Local shelf with the "Bottles" LP and the hi-fi
+ * below, ref4's record column, then the spouted liquor steps over the mirror
+ * strip — the camera tracks shelf by shelf while each group's list reads in
+ * a card; then the stainless wine tower pours red, white and rosé on the
+ * long oiled bar; then the seven cocktails slide down it as product shots.
  */
 
 const WINE_AT = new THREE.Vector3(12.8, 0, 0.9)
@@ -51,15 +55,19 @@ const R1 = ROW_Y[1] + 0.95
 const R2 = ROW_Y[2] + 1.25
 const IX = SECTION_X.international
 const AX = SECTION_X.american
+const LX = SECTION_X.local
+/** the painted "1837" (world y) */
+const PY = ky(PAINT_Y)
 /** one International page (= shelf) */
 const PG = (INTL[1] - INTL[0]) / 3
 
 const SHOTS: [number, Shot][] = [
-  [0.0, S(-7.5, 5.2, Z, 13, 0.42, 0.08, 40, 0.1, 0, 1.2)],
-  [HEAD_IN, S(-4, 4.8, Z, 12, 0.22, 0.05, 38, 0.3, 0, 1.25)],
-  [HEAD_OUT - 0.01, S(-6.4, 5, Z, 11, 0.12, 0.04, 36, 0.3, 0, 1.25)],
-  // American: tilt down its three shelves
-  [AM[0] + 0.012, S(AX, R0 - 0.4, Z, 6.6, -0.1, 0.05, 34, 0.45, 0, 1.35)],
+  // the run of the back bar from its left end: the brick bay, its sconces, "Old 1837"
+  [0.0, S(AX + 7, 6.6, Z, 27, -0.74, -0.03, 42, 0.1, 0, 1.2)],
+  [HEAD_IN, S(AX + 6, 6.8, Z, 25, -0.68, -0.05, 40, 0.3, 0, 1.25)],
+  [HEAD_OUT - 0.01, S(AX + 4, 6.9, Z, 21, -0.58, -0.03, 38, 0.3, 0, 1.25)],
+  // American: from the paint, tilt down its three shelves
+  [AM[0] + 0.012, S(AX, (PY + R0) / 2 + 0.2, Z, 8.4, -0.12, 0.04, 34, 0.45, 0, 1.35)],
   [AM[1] - 0.006, S(AX, R2 - 0.2, Z, 6.8, 0.04, 0.05, 34, 0.45, 0, 1.35)],
   // International: snake the three shelves (row = page = lit column)
   [INTL[0] + 0.15 * PG, S(IX - 3, R0, Z, 6.4, 0.12, 0.04, 34, 0.5, 0, 1.3)],
@@ -68,9 +76,9 @@ const SHOTS: [number, Shot][] = [
   [INTL[0] + 1.85 * PG, S(IX - 3, R1, Z, 6.4, 0.1, 0.03, 34, 0.5, 0, 1.3)],
   [INTL[0] + 2.15 * PG, S(IX - 3, R2, Z, 7.0, 0.1, 0.07, 34, 0.5, 0, 1.3)],
   [INTL[1] - 0.004, S(IX + 3, R2, Z, 7.0, -0.1, 0.07, 34, 0.5, 0, 1.3)],
-  // Local: a macro on the two bottles
-  [LOC[0] + 0.012, S(SECTION_X.local - 1.05, ROW_Y[2] + 1.05, Z, 3.5, -0.16, 0.06, 30, 0.35, 0, 1.5)],
-  [LOC[1] - 0.004, S(SECTION_X.local + 0.35, ROW_Y[2] + 1.2, Z, 5.0, -0.3, 0.05, 30, 0.35, 0, 1.35)],
+  // Local: a macro on the two bottles, then out to the "Bottles" LP beside them
+  [LOC[0] + 0.012, S(LX, LOCAL_Y + 1.02, Z, 3.6, -0.16, 0.06, 30, 0.35, 0, 1.5)],
+  [LOC[1] - 0.004, S((LX + LP_X) / 2 + 0.2, LOCAL_Y + 1.1, Z, 7.4, -0.2, 0.05, 30, 0.4, 0, 1.6)],
   // wine: the tower pours
   [WINE_T[0] + 0.014, S(WINE_AT.x, 1.5, WINE_AT.z, 7.2, -0.14, 0.1, 32, 0.36, 0, 1.55)],
   [WINE_T[1] - 0.012, S(WINE_AT.x, 1.4, WINE_AT.z, 6.5, 0.08, 0.08, 32, 0.36, 0, 1.55)],
@@ -89,12 +97,25 @@ const cocktailH = (pos: number) => {
   return lerp(a, b, ease.inOutCubic(pos - i))
 }
 
+/**
+ * Portrait: the run seen from the left is mostly the long bar's front at this
+ * aspect, so the headline beat frames the brick bay itself — "Old 1837" just
+ * under the headline, the American shelves below.
+ */
+const SHOTS_TALL: [number, Shot][] = [
+  [0.0, S(AX + 1.5, PY + 0.6, Z, 19, -0.36, 0.1, 40, 0, 0, 1.25)],
+  [HEAD_IN, S(AX + 0.8, PY + 0.4, Z, 17.6, -0.26, 0.09, 38, 0, 0, 1.25)],
+  [HEAD_OUT - 0.01, S(AX + 0.4, PY + 0.1, Z, 16.5, -0.2, 0.08, 38, 0, 0, 1.25)],
+  ...SHOTS.slice(3),
+]
+
 const _shot = S(0, 0, 0, 1, 0, 0, 30, 0)
 function shotAt(q: number, out: Shot, tall = false) {
+  const shots = tall ? SHOTS_TALL : SHOTS
   let i = 0
-  while (i < SHOTS.length - 2 && q > SHOTS[i + 1][0]) i++
-  const [t0, a] = SHOTS[i]
-  const [t1, b] = SHOTS[i + 1]
+  while (i < shots.length - 2 && q > shots[i + 1][0]) i++
+  const [t0, a] = shots[i]
+  const [t1, b] = shots[i + 1]
   const s = ease.inOutCubic(clamp((q - t0) / (t1 - t0)))
   for (const k of KEYS) out[k] = lerp(a[k], b[k], s)
   // cocktails: frame the glass on the bar (a tall collins needs more room)
@@ -116,6 +137,7 @@ export default function cellar(): Chapter {
   const clock = new StoryClock({ rate: 0.075 })
   let hud: CellarHud
   let wall: BottleWall
+  let room: CellarBar
   let tower: WineTower
   let slots: CocktailSlot[] = []
   let singles: Single[] = []
@@ -134,22 +156,18 @@ export default function cellar(): Chapter {
 
     async init(ctx: ChapterContext) {
       hud = new CellarHud(ctx.stage)
-      wall = await makeBottleWall(ctx.mobile)
-      group.add(wall.group)
-      // redraw the label atlas in the real faces
-      const faces = ['italic 400 40px "Instrument Serif"', '400 40px "Alfa Slab One"']
-      Promise.race([Promise.all(faces.map(f => document.fonts.load(f))), new Promise(r => setTimeout(r, 2500))]).then(() => wall.redraw())
-      document.fonts?.ready.then(() => wall.redraw())
+      // Glory's back bar (the room kit) around the named bottles, and the long bar
+      const plan = planBottles()
+      await prepareCellarBar()
+      room = makeCellarBar(plan.rows, ctx.mobile)
+      group.add(room.group)
       await nextFrame()
-
-      // the front bar the wine and the cocktails stand on
-      const bar = makeBarTop({ length: 44, depth: 3.4 })
-      bar.position.set(6, 0, 1.3)
-      group.add(bar)
-      // the bar's front face (dark oak), so low shots never see under it
-      const front = new THREE.Mesh(new THREE.BoxGeometry(44, 3, 0.1), new THREE.MeshStandardMaterial({ color: '#1c100a', roughness: 0.7 }))
-      front.position.set(6, -1.62, 3.0)
-      group.add(front)
+      room.group.updateMatrixWorld(true)
+      wall = await makeBottleWall(plan, ctx.mobile, { set: room.kit.materials.pools, root: room.kit.group })
+      group.add(wall.group)
+      // redraw the label atlas once the house faces land (Alfa Slab One + Inter Tight)
+      onFonts(() => wall.redraw())
+      await nextFrame()
 
       tower = makeWineTower()
       tower.group.position.copy(WINE_AT)
@@ -187,15 +205,23 @@ export default function cellar(): Chapter {
       const art = singlesArt(ctx.mobile)
       const easelSteel = new THREE.MeshStandardMaterial({ color: '#16110e', metalness: 0.7, roughness: 0.38 })
       singles = [makeSingle(art, easelSteel), makeSingle(art, easelSteel)]
-      for (const sg of singles) group.add(sg.group)
+      singles.forEach((sg, i) => {
+        sg.group.name = `cellar-single-${i}`
+        group.add(sg.group)
+      })
       await nextFrame()
 
-      // the "Bottles" LP leaning on the Local shelf, its back (the whole list) to the room
+      // the "Bottles" LP leaning on the Local shelf's walnut, its back (the whole
+      // list) to the room: turned round in a holder, posed from its real bounds
+      // so no corner reaches the wall or dips into the shelf
       const lp = makeBottlesLP(ctx.mobile)
-      lp.group.scale.setScalar(2)
-      lp.group.position.set(LP_X, ROW_Y[2], WALL_Z - 0.05)
-      lp.group.rotation.set(0.25, Math.PI - 0.1, 0, 'YXZ')
-      group.add(lp.group)
+      const holder = new THREE.Group()
+      holder.name = 'cellar-bottles-lp'
+      lp.group.rotation.y = Math.PI
+      holder.add(lp.group)
+      group.add(holder)
+      holder.scale.setScalar(0.315 * K)
+      leanAgainst(holder, { wallZ: kz(WZ), floorY: LOCAL_Y, x: LP_X, lean: 0.13, yaw: -0.05 })
       slots[0].show(0)
       slots[1].show(1)
 
@@ -230,7 +256,8 @@ export default function cellar(): Chapter {
       // the Glory roundel above the Local shelf: a stamp, used once
       const plaqueMat = new THREE.MeshStandardMaterial({ color: '#2a1a14', roughness: 0.5, transparent: true, alphaTest: 0.5 })
       const plaque = new THREE.Mesh(new THREE.CircleGeometry(0.62, 48), plaqueMat)
-      plaque.position.set(SECTION_X.local, ROW_Y[2] + 4.3, WALL_Z - 0.2)
+      plaque.scale.setScalar(0.72)
+      plaque.position.set(kx(1.825), ky(2.47), kz(WZ) + 0.02)
       group.add(plaque)
       whenRevealed()
         .then(() => new THREE.TextureLoader().loadAsync(BRAND.roundel))
@@ -312,14 +339,16 @@ export default function cellar(): Chapter {
       const w = ctx.world.params
       const inBottles = q < WINE_T[0] - 0.01
       const cocktails = q > COCK[0] - 0.012
-      w.top = '#0c0706'
+      // the room is built (backbar.ts): the world backdrop only rounds it off
+      w.top = '#0c0807'
       w.bottom = '#040201'
-      w.brick = 0.18
-      w.brickColor = '#2e140d'
-      w.bulbs = 0.32
-      w.haze = 0.14
-      w.bokeh = 0.12
-      w.cyc = 0.25
+      w.brick = 0
+      w.room = 0.5
+      w.strings = 0
+      w.bulbs = 0.3
+      w.haze = 0.04
+      w.bokeh = 0
+      w.cyc = 0.12
       w.cycColor = '#4a2414'
       w.fill = 0.16
       w.env = 1.1
@@ -330,7 +359,7 @@ export default function cellar(): Chapter {
       const fin = smoothstep(0.93, 0.99, local)
       // cream sleeves bloom under a hot key: keep it ≈ 0.5–0.7 near the vinyl
       const nearLP = q > LOC[0] - 0.01 && q < LOC[1] + 0.004
-      w.spot = (nearLP ? 0.5 : inBottles ? 0.75 : cocktails ? 0.72 : 0.95) * (1 - 0.45 * fin)
+      w.spot = (nearLP ? 0.32 : inBottles ? 0.42 : cocktails ? 0.72 : 0.7) * (1 - 0.45 * fin)
       w.spotColor = GEL.tungsten
       w.spotAngle = inBottles ? 0.5 : 0.36
       w.spotPenumbra = 0.7
@@ -342,13 +371,22 @@ export default function cellar(): Chapter {
       w.rimB = cocktails ? 1.0 : 0.7
       w.rimBColor = GEL.cream
       w.rimBDir.set(0.9, 0.35, -1)
-      wall.setBacklight(inBottles ? 0.95 : 0.7)
+      // light through the bottles' glass (the sconces beside them), the room's bulbs + bounce
+      wall.setBacklight(0.05)
+      // bright filaments, gentler pools (the paint and the labels near the sconces stay readable)
+      room.set(1 - 0.25 * fin, 0.7)
+      room.kit.materials.pools.k = (inBottles ? 0.55 : cocktails ? 0.4 : 0.5) - 0.12 * fin
+      if (room.turntable) {
+        room.turntable.setSpeed(reduced ? 0 : 33.33, true)
+        room.turntable.update(frame)
+      }
       syncVinylLights(ctx.world)
       // no bright finale into the cut: the product-shot card dims as we push in
       if (cards[0]) ((cards[0].material as THREE.MeshBasicMaterial).color.setScalar(0.9 * (1 - 0.55 * smoothstep(0.93, 0.99, local))))
 
-      // ---- post: a ruby pour out ----
+      // ---- post: a ruby pour out; bloom only on the filaments and the pours ----
       ctx.post.params.beer = lerp(0.62, 0.8, smoothstep(0.3, 0.9, local))
+      ctx.post.params.bloomThreshold = inBottles ? 1.08 : 1.04
     },
 
     camera(local: number, frame: Frame, out: CameraPose) {

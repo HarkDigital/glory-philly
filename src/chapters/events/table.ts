@@ -1,31 +1,36 @@
 import * as THREE from 'three'
-import { makeBarTop } from '../../kit/bar'
+import { makeBarTop, woodMaps } from '../../kit/bar'
 import { makeGlass, BEERS, type Glass } from '../../kit/beer'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { rng } from '../../core/math'
 
 /*
- * THE BACK ROOM: one long banquet table set for a party, receding into the
- * dark. Units: 1 ≈ 10 in. The table top is y = 0; its head (where the prints
- * lie) is at z ≈ +3 and it runs to z ≈ -43.
+ * THE BACK ROOM: one long banquet table set for a party down the middle of
+ * Glory's dining room. Units: 1 = 0.254 m (10 in). The table top is y = 0
+ * (0.76 m), the floor y = -3; its head (where the prints lie) is at z ≈ +3
+ * and it runs to z ≈ -30, toward the back bar (room.ts).
  *
  * Every repeat is an InstancedMesh: plates, black napkins, cutlery, cheap
- * stand-in stemware (additive glints, no transmission), bentwood chair backs,
- * brass holders, taper candles, flames (one billboard shader: a teardrop core
- * and a soft halo, flickering gently by time), little bouquets. Only THREE
- * glasses near the camera are real transmissive kit glasses (rosé).
+ * stand-in stemware (additive glints, no transmission), Glory's own chairs
+ * (black steel frames, walnut seats and back rests, as at the bar), black
+ * steel legs, brass holders, taper candles, flames (one billboard shader: a
+ * teardrop core and a soft halo, flickering gently by time), little
+ * bouquets. Only THREE glasses near the camera are real transmissive kit
+ * glasses (rosé). `lit` hooks a mesh into the pendants' light pools.
  */
 
 export const TABLE = {
   /** z of the head end of the table */
   head: 3.1,
-  length: 46,
+  length: 33.4,
   width: 3.4,
   /** place settings */
   first: -0.9,
   step: 2.3,
-  n: 19,
+  n: 13,
   plateX: 1.12,
+  /** the floor under it */
+  floor: -3,
 }
 
 const settingZ = (i: number) => TABLE.first - i * TABLE.step
@@ -104,7 +109,7 @@ const FLAME_FRAG = /* glsl */ `
   }
 `
 
-export function makeBanquetTable(mobile: boolean): BanquetTable {
+export function makeBanquetTable(mobile: boolean, lit: (m: THREE.Mesh | THREE.InstancedMesh) => void = () => {}): BanquetTable {
   const group = new THREE.Group()
   const R = rng(7)
 
@@ -112,6 +117,7 @@ export function makeBanquetTable(mobile: boolean): BanquetTable {
   const top = makeBarTop({ length: TABLE.length, depth: TABLE.width, thickness: 0.14 })
   top.rotation.y = Math.PI / 2
   top.position.z = TABLE.head - TABLE.length / 2
+  top.receiveShadow = true
   group.add(top)
 
   // ---- runner: loose cream linen down the centre
@@ -172,19 +178,45 @@ export function makeBanquetTable(mobile: boolean): BanquetTable {
     new THREE.MeshStandardMaterial({ color: '#d9d5cf', metalness: 1, roughness: 0.22 }),
     N * 4,
   )
-  // ---- chairs: the bentwood backs rise just above the table edge
-  const arc = new THREE.TorusGeometry(0.3, 0.032, 8, 20, Math.PI)
-  arc.translate(0, 0.12, 0)
-  const postL = new THREE.CylinderGeometry(0.03, 0.03, 1.5, 8)
-  postL.translate(-0.3, 0.12 - 0.75, 0)
-  const postR = postL.clone()
-  postR.translate(0.6, 0, 0)
-  const rail = new THREE.TorusGeometry(0.3, 0.02, 6, 20, Math.PI)
-  rail.translate(0, -0.12, 0)
-  const seat = new THREE.CylinderGeometry(0.42, 0.42, 0.06, 20)
-  seat.translate(0, -1.35, -0.36)
-  const chairGeo = mergeGeometries([arc, postL, postR, rail, seat])!
-  const chairs = new THREE.InstancedMesh(chairGeo, new THREE.MeshStandardMaterial({ color: '#17100c', roughness: 0.5 }), N * 2)
+  // ---- chairs: Glory's own (ref6) — square black steel frames, walnut seats and
+  // back rests. Local: the back plane at z = 0, the seat toward -z (the table),
+  // x across the chair; y is the table's (the floor at TABLE.floor).
+  const F = TABLE.floor
+  const bx = (w: number, h: number, d: number, x: number, y: number, z: number) => {
+    const g = new THREE.BoxGeometry(w, h, d)
+    g.translate(x, y, z)
+    return g
+  }
+  const tube = 0.09
+  const px = 0.78
+  const steelParts = [
+    // rear posts from the floor to just over the table edge
+    bx(tube, 0.3 - F, tube, -px, (0.3 + F) / 2, 0),
+    bx(tube, 0.3 - F, tube, px, (0.3 + F) / 2, 0),
+    // a rail under the back rest
+    bx(px * 2, 0.08, 0.08, 0, -0.58, 0),
+    // front legs up to the seat
+    bx(tube, -1.29 - F, tube, -px, (-1.29 + F) / 2, -1.62),
+    bx(tube, -1.29 - F, tube, px, (-1.29 + F) / 2, -1.62),
+    // stretchers
+    bx(0.07, 0.07, 1.62, -px, F + 0.5, -0.81),
+    bx(0.07, 0.07, 1.62, px, F + 0.5, -0.81),
+    bx(px * 2, 0.07, 0.07, 0, F + 0.75, -1.62),
+  ]
+  const woodParts = [
+    // the back rest: one walnut board across the posts
+    bx(1.7, 0.4, 0.075, 0, 0.03, -0.085),
+    // the seat
+    bx(1.78, 0.1, 1.72, 0, -1.24, -0.84),
+  ]
+  const chairSteel = mergeGeometries(steelParts)!
+  const chairWood = mergeGeometries(woodParts)!
+  for (const g of [...steelParts, ...woodParts]) g.dispose()
+  const steelMat = new THREE.MeshStandardMaterial({ color: '#141212', roughness: 0.46, metalness: 0.55 })
+  const { map: wmap, roughnessMap: wrough } = woodMaps()
+  const chairWoodMat = new THREE.MeshStandardMaterial({ map: wmap, roughnessMap: wrough, color: '#b98a66', roughness: 1, envMapIntensity: 0.5 })
+  const chairs = new THREE.InstancedMesh(chairSteel, steelMat, N * 2)
+  const seats = new THREE.InstancedMesh(chairWood, chairWoodMat, N * 2)
   for (let i = 0; i < N; i++) {
     const z = settingZ(i)
     for (let s = 0; s < 2; s++) {
@@ -195,13 +227,34 @@ export function makeBanquetTable(mobile: boolean): BanquetTable {
       set(naps, k, x + side * 0.02, 0.05, z + (R() - 0.5) * 0.04, (R() - 0.5) * 0.06)
       set(cut, k * 2, x, 0, z + 0.62, 0)
       set(cut, k * 2 + 1, x, 0, z - 0.62, 0)
-      // chair back: an arch facing along x (the diner's back), top at y ≈ 0.42
-      set(chairs, k, side * 2.0, 0.08, z + (R() - 0.5) * 0.08, side * Math.PI / 2 + (R() - 0.5) * 0.12)
+      // the chair pushed in: its back just past the table edge, a little askew
+      const cz = z + (R() - 0.5) * 0.1
+      const cyaw = side * Math.PI / 2 + (R() - 0.5) * 0.08
+      const cxx = side * (2.08 + R() * 0.12)
+      set(chairs, k, cxx, 0, cz, cyaw)
+      set(seats, k, cxx, 0, cz, cyaw)
     }
   }
   plates.receiveShadow = true
   naps.receiveShadow = true
-  group.add(plates, naps, cut, chairs)
+  group.add(plates, naps, cut, chairs, seats)
+
+  // ---- legs: black steel posts in pairs down the table
+  const legGeo = new THREE.BoxGeometry(0.14, -F - 0.14, 0.14)
+  legGeo.translate(0, (F - 0.14) / 2, 0)
+  // (at the head and between place settings, never where a chair's seat slides under)
+  const legZ = [TABLE.head - 0.4]
+  for (let i = 2; i < N - 1; i += 3) legZ.push(settingZ(i) - TABLE.step / 2)
+  legZ.push(TABLE.head - TABLE.length + 0.4)
+  const legs = new THREE.InstancedMesh(legGeo, steelMat, legZ.length * 2)
+  legZ.forEach((z, i) => {
+    for (let s = 0; s < 2; s++) set(legs, i * 2 + s, (s ? 1 : -1) * (TABLE.width / 2 - 0.3), 0, z)
+  })
+  // a dark apron under the top's edge
+  const apronGeo = new THREE.BoxGeometry(TABLE.width - 0.5, 0.3, TABLE.length - 0.6)
+  apronGeo.translate(0, -0.29, TABLE.head - TABLE.length / 2)
+  const apron = new THREE.Mesh(apronGeo, new THREE.MeshStandardMaterial({ color: '#171211', roughness: 0.6 }))
+  group.add(legs, apron)
 
   // ---- stemware. The three near glasses are real (transmission, rosé); the rest
   // are cheap stand-ins sharing the goblet's shell: black + additive, so only
@@ -335,6 +388,9 @@ export function makeBanquetTable(mobile: boolean): BanquetTable {
     }
   }
   group.add(vases, blooms, leaves)
+
+  // the pendants over the table light it too (room kit pools: no real lights)
+  for (const m of [top, runner, plates, naps, chairs, seats, tapers, vases, blooms, apron]) lit(m)
 
   // ---- candle light: three warm points low over the head of the table
   const lights: THREE.PointLight[] = []

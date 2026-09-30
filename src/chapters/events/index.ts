@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import './events.css'
 import type { CameraPose, Chapter, ChapterContext, Frame } from '../../core/types'
-import { BRAND, EVENTS, EVENTS_UI, LINKS, PHOTOS, RESERVATIONS, SECTIONS, eventInquiryHref } from '../../content'
+import { EVENTS, EVENTS_UI, LINKS, PHOTOS, SECTIONS } from '../../content'
 import { clamp, lerp, smoothstep } from '../../core/math'
 import { el, reveal, rise, setRise } from '../../core/dom'
 import { nextFrame } from '../../core/yield'
@@ -12,35 +12,45 @@ import { makeBanquetTable, type BanquetTable } from './table'
 import { makePrints, loadPhoto, type PrintStack } from './prints'
 import { makeDeck, GATEFOLD, K, type Deck } from './deck'
 import { syncVinylLights } from '../../kit/vinyl'
+import { makeDiningRoom, type DiningRoom } from './room'
+import { dockEventForm, type EventFormDock } from '../../ui/eventForm'
 
 /*
  * EVENTS — "The Back Room".
  *
- * One long banquet table in Glory's dining room, set for a party: plates and
- * black napkins, stemware, bentwood chairs, bouquets, and three-taper
- * candelabra down a linen runner, flickering off into the dark under the
- * string lights. A party needs a record: across the head of the table a
- * sideboard carries a black deck playing a Glory record at 33⅓, a few Glory
- * sleeves leaning in a rack beside it. On the table lies the photo "album":
- * an open gatefold LP with a stack of lab prints on it — the dining room,
- * then the site's seven party photographs, counted like a tracklist.
+ * One long banquet table set for a party down the middle of GLORY'S DINING
+ * ROOM (room.ts, from the room kit and Mike's photos): reclaimed walnut
+ * walls and boxy clad columns with wire-cage sconces, shelves packed with
+ * LPs, the chalk tap boards on black, an exposed-brick accent panel, a Glory
+ * LP face-out on a steel ledge; the black ceiling with the silver flex duct
+ * and a galvanized trunk, wire-cage pendants over the table; the honey oak
+ * floor; and at the far end the back bar itself ("Old 1837" on the brick,
+ * LPs over spouted liquor steps) behind the long oiled bar and its stools.
+ * A party needs a record: across the head of the table a sideboard carries a
+ * black deck playing a Glory record at 33⅓ and a walnut rack of three Glory
+ * sleeves (posed exactly: no clipping). On the table lies the photo "album":
+ * an open gatefold LP with lab prints — the dining room, then the site's
+ * seven party photographs, counted like a tracklist.
  *
- *   0.00–0.06  cut in: a dolly over the deck, down the length of the table
- *   0.07–0.72  "Book an Event / Parties & Corporate Events" + the two body
- *              lines (copy column left; on top when stacked). Landing 0.1.
+ *   0.00–0.06  cut in: a dolly over the deck, down the room to the back bar
+ *   0.07–0.72  "Book an Event / Parties & Corporate Events", the two body
+ *              lines and Upcoming Events (copy column left; on top when
+ *              stacked). Landing 0.1.
  *   0.13–0.23  the camera cranes up over the head of the table to the prints
- *   0.22–0.70  the album: the top print (the dining room) lifts and turns up
- *              to the camera; each next one follows while the last is laid on
- *              the gatefold's other panel — Track 1 / 7 … 7 / 7. Paced by a StoryClock (≤ 1.1 prints
- *              a second, each ≥ 0.9 s), cross-fades in place under reduced
+ *   0.22–0.70  the album: the top print lifts and turns up to the camera;
+ *              each next one follows while the last is laid on the
+ *              gatefold's other panel — Track 1 / 7 … 7 / 7. Paced by a
+ *              StoryClock (≤ 1.1 prints a second), cross-fades under reduced
  *              motion.
- *   0.71–0.80  the camera rises to a high three-quarter view: the deck and the
- *              album bottom left, the whole table running up behind the card
- *   0.78–0.96  the inquiry: a printed card listing the form's fields, with
- *              Event Inquiry Form (a pre-filled email to Dave) and Upcoming
- *              Events, and the note for parties of more than 10.
+ *   0.71–0.80  the camera rises and turns down the room to the back bar
+ *   0.77–0.975 THE FORM: the real Event Inquiry Form (src/ui/eventForm.ts)
+ *              docked over the scene beside the room view (on phones it is
+ *              the card over the room). It lives in #events' accessible
+ *              section (srContent), never in this aria-hidden stage: Tab
+ *              reaches it in story order and focusing it lands the story on
+ *              0.86; it stays up while a field has focus.
  *
- * Anchors (srContent): 0 the room (photos + copy) · 1 the inquiry.
+ * Anchors (srContent): 0 the room (photos + copy) · 1 the inquiry (the form).
  */
 
 /** photo aspects (w / h) of the files, so the prints are the right shape before they load */
@@ -122,6 +132,7 @@ function blend(a: Pose, b: Pose, t: number, out: Pose) {
 export default function events(): Chapter {
   const group = new THREE.Group()
   let table: BanquetTable
+  let dining: DiningRoom
   let prints: PrintStack
   let deck: Deck
   let stage: HTMLElement
@@ -131,8 +142,8 @@ export default function events(): Chapter {
   let scrim: HTMLElement
   let count: HTMLElement
   let countN: HTMLElement
-  let cardWrap: HTMLElement
-  let cardFx: HTMLElement
+  /** the REAL Event Inquiry Form (src/ui/eventForm.ts), docked over the scene from #events' accessible section */
+  let inquiry: EventFormDock | null = null
   let probe: HTMLElement
   let mobile = false
 
@@ -181,7 +192,9 @@ export default function events(): Chapter {
     async init(ctx: ChapterContext) {
       mobile = ctx.mobile
       stage = ctx.stage
-      table = makeBanquetTable(mobile)
+      dining = await makeDiningRoom(mobile)
+      group.add(dining.group)
+      table = makeBanquetTable(mobile, m => dining.litByPendants(m))
       group.add(table.group)
       await nextFrame()
       deck = makeDeck(mobile)
@@ -212,41 +225,26 @@ export default function events(): Chapter {
       head = rise(el('h2', 'hud-h2', undefined, copy), `${words.join(' ')} <em>${last}</em>`)
       const body = el('div', 'ev-body', undefined, copy)
       for (const b of EVENTS.body) el('p', 'hud-body', b, body)
+      // Upcoming Events (mouse/touch; keyboard reaches the same link in the accessible copy)
+      const up = el('a', 'hud-btn hud-btn--ghost ev-upcoming', undefined, copy)
+      up.href = LINKS.events.url
+      up.target = '_blank'
+      up.rel = 'noopener'
+      up.append(document.createTextNode(LINKS.events.label))
+      el('span', 'ev-arrow', '↗', up).setAttribute('aria-hidden', 'true')
 
       count = el('div', 'ev-count', undefined, root)
       count.append(document.createTextNode(`${EVENTS_UI.track} `))
       countN = el('b', '', '1', count)
       count.append(document.createTextNode(` / ${NE}`))
 
-      cardWrap = el('div', 'ev-card-wrap', undefined, root)
-      cardFx = el('div', 'ev-card-fx', undefined, cardWrap)
-      const card = el('div', 'ev-card', undefined, cardFx)
-      const ch = el('div', 'ev-card-head', undefined, card)
-      const ct = el('div', '', undefined, ch)
-      el('p', 'ev-card-brand', BRAND.name, ct)
-      el('h3', 'ev-card-title', SECTIONS.events.eyebrow, ct)
-      const stamp = el('img', 'ev-stamp', undefined, ch)
-      stamp.src = BRAND.roundel
-      stamp.alt = ''
-      const ul = el('ul', 'ev-fields', undefined, card)
-      EVENTS.fields.forEach((f, i) => {
-        const li = el('li', i === EVENTS.fields.length - 1 ? 'is-tall' : '', undefined, ul)
-        el('span', 'ev-n', String(i + 1).padStart(2, '0'), li)
-        el('span', '', f, li)
-      })
-      el('p', 'ev-req', EVENTS_UI.required, card)
-      const btns = el('div', 'ev-btns', undefined, card)
-      const a1 = el('a', 'hud-btn', EVENTS.cta, btns)
-      a1.href = eventInquiryHref()
-      const a2 = el('a', 'hud-btn hud-btn--ghost', LINKS.events.label, btns)
-      a2.href = LINKS.events.url
-      a2.target = '_blank'
-      a2.rel = 'noopener'
-      el('p', 'ev-large', RESERVATIONS.large, card)
+      // the form itself lives in #events' accessible section (srContent: [data-event-form]),
+      // never in this aria-hidden stage: dock it over the scene for the inquiry beat
+      const mount = document.querySelector<HTMLElement>('#events [data-event-form]')
+      if (mount) inquiry = dockEventForm(mount)
 
       probe = el('div', 'ev-probe', undefined, root)
       reveal(copy, 0)
-      reveal(cardFx, 0)
       reveal(count, 0, 0)
       reveal(scrim, 0, 0)
 
@@ -277,6 +275,10 @@ export default function events(): Chapter {
       measure()
     },
 
+    onLeave() {
+      inquiry?.set(0)
+    },
+
     update(local, frame: Frame, ctx: ChapterContext) {
       const reduced = frame.reducedMotion
       const W = frame.width
@@ -295,17 +297,19 @@ export default function events(): Chapter {
       const t = frame.time
       table.lights.forEach((L, i) => {
         const fl = 1 + amp * (0.05 * Math.sin(t * 4.1 + i * 2.3) + 0.03 * Math.sin(t * 7.3 + i * 5.1))
-        L.intensity = (i === 0 ? 2.6 : 2.2) * fl
+        L.intensity = (i === 0 ? 1.3 : 1.1) * fl
       })
 
       // ---- DOM
-      const copyV = smoothstep(COPY_IN[0], COPY_IN[1], local) * (1 - smoothstep(COPY_OUT[0], COPY_OUT[1], local))
+      // the form beat; while a field has focus the form stays up (a phone keyboard may nudge
+      // the page) unless the visitor has clearly scrolled back into the story
+      const hold = !!inquiry?.active && local > 0.6
+      const formV = hold ? 1 : smoothstep(CARD_IN[0], CARD_IN[1], local) * (1 - smoothstep(CARD_OUT[0], CARD_OUT[1], local))
+      inquiry?.set(formV)
+      const copyV = hold ? 0 : smoothstep(COPY_IN[0], COPY_IN[1], local) * (1 - smoothstep(COPY_OUT[0], COPY_OUT[1], local))
       reveal(copy, copyV)
-      reveal(scrim, Math.max(copyV, 0.0), 0)
-      setRise(head, local > 0.045 && local < 0.72)
-      const cardV = smoothstep(CARD_IN[0], CARD_IN[1], local) * (1 - smoothstep(CARD_OUT[0], CARD_OUT[1], local))
-      reveal(cardFx, cardV, 18)
-      cardWrap.style.visibility = cardV < 0.002 ? 'hidden' : 'visible'
+      reveal(scrim, copyV, 0)
+      setRise(head, !hold && local > 0.045 && local < 0.72)
 
       // the count: shown while a party print is presented and settled
       const k = Math.round(s)
@@ -326,38 +330,44 @@ export default function events(): Chapter {
       }
       reveal(count, cv, 0)
 
-      // ---- light: the bar after dark, candles and the string lights overhead
+      // ---- light: Glory after dark — the room's Edison sconces and pendants (kit pools), candles, one key
       const w = ctx.world.params
       const room = smoothstep(TO_ROOM[0], TO_ROOM[1], local)
-      w.brick = 0.42
-      w.bulbs = 0.75
-      w.bulbColor = GEL.bulb
-      w.bokeh = 0.4
+      dining.setGlow(1)
+      dining.setAmbient(0.5)
+      // the real room is built around the table: the backdrop's own room only fills the gaps
+      w.brick = 0
+      w.room = 0.4
+      w.bulbs = 0
+      w.bokeh = 0.12
       w.bokehA = GEL.candle
       w.bokehB = GEL.amber
-      w.haze = 0.22
+      w.haze = 0.1
       w.hazeColor = '#9a5a2e'
-      w.hazeY = 0.05
-      w.cyc = 0.32
-      w.cycColor = '#5a2a18'
-      w.cycX = stacked(W, H) ? 0 : 0.2
-      w.cycY = 0.1
-      // the key: over the deck and the album at the head (intro), onto the prints (album), the whole head (room)
-      const onPrints = smoothstep(TO_PRINTS[0], TO_PRINTS[1], local) * (1 - room)
-      const intro = 1 - Math.max(onPrints, room)
-      w.spot = 0.34 * intro + 0.22 * onPrints + 0.3 * room
+      w.hazeY = 0.2
+      w.cyc = 0
+      // the key (the only shadow caster): straight down from the head of the table onto the deck and
+      // the album (a pendant's pool, sharpened), then down the room over the far table for the form
+      const toPrints = smoothstep(TO_PRINTS[0], TO_PRINTS[1], local)
+      const wI = (1 - toPrints) * (1 - room)
+      const wP = toPrints * (1 - room)
+      const wR = room
+      w.spot = 0.36 * wI + 0.26 * wP + 0.2 * wR
       w.spotColor = GEL.tungsten
-      w.spotPos.set(2.6 * intro + 1.4 * onPrints + 3.2 * room, 7.5 * intro + 6.5 * onPrints + 8.5 * room, 8.2 * intro + 4.6 * onPrints + 7.5 * room)
-      w.spotAt.set(0.9 * intro + 0.0 * onPrints + 0.6 * room, 0.2, 3.2 * intro + 1.7 * onPrints + 2.4 * room)
-      w.spotAngle = 0.5 * intro + 0.36 * onPrints + 0.5 * room
-      w.spotPenumbra = 0.7
-      w.rimA = 0.9
-      w.rimAColor = GEL.candle
+      // (always under the ceiling's joists and between the two ducts)
+      w.spotPos.set(1.3 * wI + 1.2 * wP + 1.5 * wR, 9.0 * wI + 7.5 * wP + 9.0 * wR, 5.4 * wI + 4.0 * wP - 12 * wR)
+      w.spotAt.set(0.6 * wI + 0.0 * wP + 0.0 * wR, 0.2, 3.0 * wI + 1.7 * wP - 19 * wR)
+      w.spotAngle = 0.3 * wI + 0.32 * wP + 0.4 * wR
+      w.spotPenumbra = 0.75
+      // the rims make the rosé glasses and the prints glow; kept low — on the room's big floor and
+      // walls a directional rim is a flood (the sconces and pendants light the room)
+      w.rimA = 0.14 + 0.16 * wP
+      w.rimAColor = GEL.bulb
       w.rimADir.set(-0.5, 0.45, -1)
-      w.rimB = 0.35
+      w.rimB = 0.1 + 0.12 * wP
       w.rimBColor = GEL.dusk
       w.rimBDir.set(0.9, 0.3, -1)
-      w.fill = 0.06
+      w.fill = 0.05
       w.env = 0.85
 
       syncVinylLights(ctx.world)
@@ -365,8 +375,9 @@ export default function events(): Chapter {
       const p = ctx.post.params
       p.beer = 0.35
       p.bloomStrength = 0.42
-      p.warmth = 0.55
-      p.vignette = 0.38
+      p.warmth = 0.2
+      p.saturation = 0.95
+      p.vignette = 0.34
     },
 
     camera(local, frame: Frame, out: CameraPose) {
@@ -377,17 +388,18 @@ export default function events(): Chapter {
       const calm = frame.reducedMotion
       const ow = lay.W > 1 ? W / lay.W : 1
 
-      // A: low at the head of the table, looking down its length
+      // A: low over the deck at the head of the table, looking down Glory's dining room to the
+      // back bar at its far end (pendants, duct, walnut and records on the walls)
       const dolly = calm ? 0.5 : smoothstep(0, 0.2, local)
       if (st) {
-        A.pos.set(2.2, 3.0, lerp(10.9, 10.4, dolly))
-        A.tgt.set(-0.2, 1.3, -3)
-        A.fov = 50
+        // nearly level: the back bar sits just under the copy, the table runs down to the deck
+        A.pos.set(2.1, 3.2, lerp(11.6, 11.0, dolly))
+        A.tgt.set(-0.5, 2.5, -14)
+        A.fov = 54
       } else {
-        // over the deck on the sideboard, down the length of the table
-        A.pos.set(lerp(2.25, 2.05, dolly), 2.5, lerp(9.3, 8.8, dolly))
-        A.tgt.set(-0.6, 0.25, -3)
-        A.fov = sl ? 40 : 36
+        A.pos.set(lerp(2.5, 2.25, dolly), 2.35, lerp(10.6, 9.9, dolly))
+        A.tgt.set(-0.9, 1.45, -20)
+        A.fov = sl ? 44 : 40
       }
 
       // B: over the prints, the presented print framed in the free region
@@ -409,18 +421,18 @@ export default function events(): Chapter {
       frameTo(B, AT.present, dirB, sw, sh, reg, W, H, st ? 40 : 34)
       if (!calm) B.pos.addScaledVector(dirB.normalize(), 0.12 * drift)
 
-      // C: high three-quarter view of the whole table for the inquiry
+      // C: the inquiry — risen over the table and turned down the room: the party set all the
+      // way to the back bar ("Old 1837", the LPs, the sconces), in the free space beside the form
       if (st) {
-        Cp.pos.set(3.4, 5.4, 12.5)
-        Cp.tgt.set(0.2, -0.6, -2)
-        Cp.fov = 50
+        Cp.pos.set(1.3, 4.1, 1.2)
+        Cp.tgt.set(3.6, 3.1, -46)
+        Cp.fov = 56
       } else {
-        // high three-quarter: the deck and the album bottom left, the table running up behind the card
-        Cp.pos.set(4.35, 4.6, 10.1)
-        Cp.tgt.set(-0.25, -0.3, -3.9)
-        Cp.fov = sl ? 40 : 36
+        Cp.pos.set(2.6, 4.7, 2.0)
+        Cp.tgt.set(9.6, 2.9, -46)
+        Cp.fov = sl ? 46 : 42
       }
-      if (!calm) Cp.pos.x -= 0.3 * smoothstep(TO_ROOM[1], 1, local)
+      if (!calm) Cp.pos.z -= 0.9 * smoothstep(TO_ROOM[1], 1, local)
 
       const ab = smoothstep(TO_PRINTS[0], TO_PRINTS[1], local)
       const bc = smoothstep(TO_ROOM[0], TO_ROOM[1], local)

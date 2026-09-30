@@ -5,8 +5,8 @@ import { clamp, ease, lerp, smoothstep } from '../../core/math'
 import { nextFrame } from '../../core/yield'
 import { BAR, BRAND, DRAFTS, LINKS, SECTIONS, TAPS_UI } from '../../content'
 import { makeGlass, makeBacklight, makePourStream, BEERS, type BeerStyle, type Glass, type GlassShape } from '../../kit/beer'
-import { makeBarTop, makeBrickWall } from '../../kit/bar'
-import { makeTapWall, TRAY_Y, FAUCET_Y, FAUCET_Z, type TapSpec } from '../../kit/tap'
+import { makeTapWall, TRAY_Y, FAUCET_Y, FAUCET_Z, type TapBay, type TapSpec } from '../../kit/tap'
+import { makeBarRun, prepareRoom, type RoomKit } from '../../kit/room'
 import { StoryClock } from '../../kit/pace'
 import {
   CrateRig,
@@ -22,7 +22,8 @@ import {
   type Crate,
   type PaperName,
 } from '../../kit/vinyl'
-import { makeChalkboard, type Chalkboard } from './chalk'
+import { makeChalkboard } from './chalk'
+import { boardsCentre, makeTapRoom, prepareTapRoom, ROOM, type TapRoom, type TapRoomSpec } from './room'
 import './taps.css'
 
 /*
@@ -31,15 +32,28 @@ import './taps.css'
  *  0.000–0.045  in-beat: a macro on one chrome faucet, sliding past (the pour
  *               cut covers the first ~3%), pulling back into
  *  0.045–0.235  THE REVEAL: the camera pulls back along the wall — 36 handles
- *               on a stainless manifold against old brick — "36 beers on tap."
- *               with the Bar page intro (first sentence as the lead).
+ *               on stainless manifolds in Glory's real back bar (walnut plank
+ *               cladding, boxy clad columns with wire-cage sconces, the brick
+ *               "Old 1837" bay, shelves packed with LPs, pendants, the black
+ *               ceiling and its silver duct) — "36 beers on tap." with the
+ *               Bar page intro (first sentence as the lead).
  *  0.25–0.49    AMERICAN   (19) · dolly along its stretch, settle on one handle:
  *  0.51–0.67    INTERNATIONAL (9)   it pulls forward and pours into a glass
  *  0.69–0.85    LOCAL      (7)   tinted for the group. The group's list sits in
  *                                 a menu-board panel (two columns on desktop,
  *                                 paged on phones so every name reads at rest).
- *  0.87–1.000   the chalkboard at the end of the wall: "Last Update
- *               2026-09-28", the app + Untappd buttons.
+ *  0.87–1.000   the end of the wall: the Last Update slate on the last
+ *               column ("2026-09-28") and the bar's three tall chalk tap
+ *               boards on the black wall (the room kit's tapBoards: the
+ *               DRAFTS names, numbered, as on the real wall); the app +
+ *               Untappd buttons.
+ *
+ * THE ROOM (room.ts): each group of taps stands in its own bay between
+ * walnut-clad columns, as the back bar's bays do in ref1 — American under two
+ * shelves packed with LPs, International against the brick with the painted
+ * "Old 1837", Local under one LP face-out on a steel ledge (ref4). A records
+ * bay with spouted liquor steps opens the run on the left. The long oiled bar
+ * with its black rubber rail (kit/room makeBarRun) runs in front.
  *
  * THE RECORD CRATE: a Glory Records bin on the bar in front of the taps holds
  * the draft list as three LPs ("Drafts · American / International / Local",
@@ -78,31 +92,46 @@ const GLASS_SCALE = 0.5
 
 /* ---------------- the wall's layout ---------------- */
 
+/** world units per metre: the vinyl kit's 12" sleeve (1 unit) is 0.315 m */
+const S = 1 / 0.315
+/** the cladding's face (the tap wall's backplate is just in front of it) */
+const WALL_Z = -0.945
+/** the walnut-clad columns between the groups: width, depth from the cladding */
+const COL_W = 1.36
+const COL_D = 1.175
+/** tap centre → column face */
+const MARGIN = 0.27
+/** the records bay at the left end of the run */
+const LIQ_W = 1.3 * S
+/** the ebonised back counter meets the long bar here (its rubber rail runs in front of the drip trays) */
+const COUNTER_FRONT = -0.222
+
 interface TapInfo {
   spec: TapSpec
   group: number
   name?: string
 }
 const TAPS: TapInfo[] = []
-const SLOT: number[] = []
+DRAFTS.forEach((g, gi) => g.beers.forEach(b => TAPS.push({ spec: { name: b, num: String(TAPS.length + 1).padStart(2, '0') }, group: gi, name: b })))
+// the 36th handle: the house roundel, no beer claimed
+while (TAPS.length < BAR.taps) TAPS.push({ spec: { num: String(TAPS.length + 1).padStart(2, '0') }, group: DRAFTS.length - 1 })
+/** tap x: SPACING within a group, a clad column between groups */
+const TAP_X: number[] = []
 {
-  let slot = 0
-  DRAFTS.forEach((g, gi) => {
-    if (gi > 0) slot++ // a gap between groups
-    g.beers.forEach(b => {
-      TAPS.push({ spec: { name: b, num: String(TAPS.length + 1).padStart(2, '0') }, group: gi, name: b })
-      SLOT.push(slot++)
-    })
+  let x = 0
+  TAPS.forEach((t, i) => {
+    if (i > 0) x += t.group !== TAPS[i - 1].group ? COL_W + 2 * MARGIN : SPACING
+    TAP_X.push(x)
   })
-  // the 36th handle: the house roundel, no beer claimed
-  while (TAPS.length < BAR.taps) {
-    TAPS.push({ spec: { num: String(TAPS.length + 1).padStart(2, '0') }, group: DRAFTS.length - 1 })
-    SLOT.push(slot++)
-  }
+  const mid = (TAP_X[0] + TAP_X[TAP_X.length - 1]) / 2
+  for (let i = 0; i < TAP_X.length; i++) TAP_X[i] -= mid
 }
-const SLOTS = SLOT[SLOT.length - 1] + 1
-const TAP_X = SLOT.map(s => (s - (SLOTS - 1) / 2) * SPACING)
 const FIRST = DRAFTS.map((_, g) => TAPS.findIndex(t => t.group === g))
+const LAST = DRAFTS.map((_, g) => {
+  let l = -1
+  TAPS.forEach((t, i) => t.group === g && (l = i))
+  return l
+})
 const POUR_I = POURS.map((p, g) => {
   const i = TAPS.findIndex(t => t.group === g && t.name === p.name)
   if (i >= 0) return i
@@ -110,7 +139,14 @@ const POUR_I = POURS.map((p, g) => {
   return FIRST[g] + Math.floor(n / 2)
 })
 const WALL_R = TAP_X[TAP_X.length - 1]
-const CHALK_X = WALL_R + 1.25
+/** column centres, left → right: the records bay's far column, then one either side of each group */
+const COL_X: number[] = [TAP_X[0] - MARGIN - COL_W / 2 - LIQ_W - COL_W, TAP_X[0] - MARGIN - COL_W / 2, ...DRAFTS.map((_, g) => TAP_X[LAST[g]] + MARGIN + COL_W / 2)]
+/** each group's bay: its taps and the clear width between its columns */
+const BAYS: TapBay[] = DRAFTS.map((_, g) => ({ first: FIRST[g], last: LAST[g], x0: COL_X[g + 1] + COL_W / 2, x1: COL_X[g + 2] - COL_W / 2 }))
+/** the black wall past the last column: the three tall tap boards (room.ts BOARDS) */
+const END_E0 = COL_X[COL_X.length - 1] + COL_W / 2
+const BOARDS_X = END_E0 + boardsCentre().dx * S
+const BOARDS_Y = (boardsCentre().y - ROOM.CY) * S
 
 /* ---------------- camera ---------------- */
 
@@ -128,31 +164,38 @@ interface Shot {
   tdx: number
 }
 const KEYS_N = ['x', 'y', 'z', 'yaw', 'pitch', 'span', 'hgt', 'fov', 'tdx'] as const
-const S = (o: Partial<Shot>): Shot => ({ x: 0, y: 1.3, z: -0.5, yaw: 0.5, pitch: 0.1, span: 3, hgt: 1.4, fov: 30, tdx: 0, ...o })
+const SH = (o: Partial<Shot>): Shot => ({ x: 0, y: 1.3, z: -0.5, yaw: 0.5, pitch: 0.1, span: 3, hgt: 1.4, fov: 30, tdx: 0, ...o })
 
 const X = (i: number) => TAP_X[i]
 const MACRO_I = POUR_I[2] + 2
 const KEYS: [number, Shot][] = [
-  [0.0, S({ x: X(MACRO_I) + 0.05, y: FAUCET_Y, z: FAUCET_Z, yaw: 1.05, pitch: 0.05, span: 0.42, hgt: 0.3, fov: 26 })],
-  [0.035, S({ x: X(MACRO_I) - 0.35, y: FAUCET_Y + 0.05, z: FAUCET_Z, yaw: 0.9, pitch: 0.07, span: 0.8, hgt: 0.5, fov: 26 })],
-  [0.078, S({ x: 1.2, y: 1.28, z: -0.6, yaw: 1.0, pitch: 0.09, span: 6.2, hgt: 1.9, fov: 30 })],
-  [INTRO_B, S({ x: 0.6, y: 1.3, z: -0.6, yaw: 0.9, pitch: 0.1, span: 6.8, hgt: 2, fov: 30 })],
+  [0.0, SH({ x: X(MACRO_I) + 0.05, y: FAUCET_Y, z: FAUCET_Z, yaw: 1.05, pitch: 0.05, span: 0.42, hgt: 0.3, fov: 26 })],
+  [0.035, SH({ x: X(MACRO_I) - 0.35, y: FAUCET_Y + 0.05, z: FAUCET_Z, yaw: 0.9, pitch: 0.07, span: 0.8, hgt: 0.5, fov: 26 })],
+  // the reveal: back along the run, up to the room (records, "Old 1837", sconces, pendants)
+  [0.078, SH({ x: 1.6, y: 1.7, z: -0.6, yaw: 1.0, pitch: 0.03, span: 7.0, hgt: 3.4, fov: 34 })],
+  [INTRO_B, SH({ x: 0.9, y: 2.9, z: -0.6, yaw: 0.86, pitch: -0.1, span: 8.2, hgt: 5.8, fov: 40 })],
 ]
+/** per group: lift the pour framing a touch to take in the bay's own piece of the room (Local: the face-out LP) */
+const GROUP_DY = [0, 0, 0.2]
+const GROUP_DH = [0, 0, 0.3]
 GROUPS.forEach(([a, b], g) => {
   const L = b - a
   const p = POUR_I[g]
   const f = FIRST[g]
-  KEYS.push([a + 0.14 * L, S({ x: X(f) + 0.5, y: 1.4, yaw: 0.62, pitch: 0.14, span: 3.0, hgt: 1.5 })])
+  const dy = GROUP_DY[g]
+  const dh = GROUP_DH[g]
+  KEYS.push([a + 0.14 * L, SH({ x: X(f) + 0.5, y: 1.4 + dy, yaw: 0.62, pitch: 0.14, span: 3.0, hgt: 1.5 + dh })])
   // the pour on the left of the frame, the LP presented beside it, the record out to the right
-  KEYS.push([a + 0.3 * L, S({ x: X(p) + 0.95, y: 1.12, z: 0.0, yaw: 0.32, pitch: 0.1, span: 3.4, hgt: 2.3, tdx: -0.25 })])
-  KEYS.push([a + 0.45 * L, S({ x: X(p) + 1.12, y: 1.04, z: 0.15, yaw: 0.22, pitch: 0.08, span: 3.25, hgt: 2.25, tdx: -0.28 })])
-  KEYS.push([a + 0.8 * L, S({ x: X(p) + 1.15, y: 1.02, z: 0.15, yaw: 0.18, pitch: 0.08, span: 3.2, hgt: 2.2, tdx: -0.28 })])
-  KEYS.push([b, S({ x: X(p) + 1.0, y: 1.1, z: 0.0, yaw: 0.26, pitch: 0.1, span: 3.5, hgt: 2.4, tdx: -0.2 })])
+  KEYS.push([a + 0.3 * L, SH({ x: X(p) + 0.95, y: 1.17 + dy, z: 0.0, yaw: 0.32, pitch: 0.1, span: 3.4, hgt: 2.3 + dh, tdx: -0.25 })])
+  KEYS.push([a + 0.45 * L, SH({ x: X(p) + 1.12, y: 1.09 + dy, z: 0.15, yaw: 0.22, pitch: 0.08, span: 3.25, hgt: 2.25 + dh, tdx: -0.28 })])
+  KEYS.push([a + 0.8 * L, SH({ x: X(p) + 1.15, y: 1.07 + dy, z: 0.15, yaw: 0.18, pitch: 0.08, span: 3.2, hgt: 2.2 + dh, tdx: -0.28 })])
+  KEYS.push([b, SH({ x: X(p) + 1.0, y: 1.15 + dy, z: 0.0, yaw: 0.26, pitch: 0.1, span: 3.5, hgt: 2.4 + dh, tdx: -0.2 })])
 })
-KEYS.push([END_A + 0.02, S({ x: WALL_R + 0.55, y: 1.4, z: -0.7, yaw: 0.55, pitch: 0.1, span: 3.3, hgt: 1.9, tdx: 0.45 })])
-KEYS.push([1.0, S({ x: WALL_R + 0.65, y: 1.42, z: -0.7, yaw: 0.66, pitch: 0.11, span: 3.6, hgt: 2, tdx: 0.5 })])
+// the end: the Last Update slate on the last column + the three tall tap boards on the black wall
+KEYS.push([END_A + 0.02, SH({ x: BOARDS_X - 0.35, y: BOARDS_Y * 0.76, z: -0.7, yaw: 0.1, pitch: 0.03, span: 6.6, hgt: 4.6, tdx: -0.2 })])
+KEYS.push([1.0, SH({ x: BOARDS_X - 0.25, y: BOARDS_Y * 0.78, z: -0.7, yaw: 0.16, pitch: 0.04, span: 7.0, hgt: 4.8, tdx: -0.1 })])
 
-const _shot = S({})
+const _shot = SH({})
 const _up = new THREE.Vector3()
 function sampleShot(t: number): Shot {
   let i = 0
@@ -164,11 +207,31 @@ function sampleShot(t: number): Shot {
   return _shot
 }
 
+/* ---------------- light ---------------- */
+
+const LIGHT = {
+  /** the product key on the pour + crate, and while the cream American LP is presented */
+  spot: 0.5,
+  spotCream: 0.3,
+  spotColor: '#ffe0bc',
+  fill: 0.08,
+  env: 0.5,
+  /** the room kit: bulbs + pools, and its warm bounce */
+  glow: 0.95,
+  amb: 0.6,
+  barAmb: 0.9,
+  /** the bulbs' filaments and halos over the pools' level */
+  filament: 1.7,
+  halo: 1.8,
+  duct: 2.6,
+}
+
 /* ---------------- the record crate ---------------- */
 
 /** crate x at each group's pour: just right of the pouring glass */
 const CRATE_DX = 1.12
-const CRATE_Z = 0.56
+/** in front of the columns (their faces at WALL_Z + COL_D) and the rubber rail */
+const CRATE_Z = 0.92
 /** crate-local presentation point: beside the faucets, in front of the bin */
 const PRESENT = new THREE.Vector3(0.02, 1.02, 0.12)
 const stationX = (g: number) => X(POUR_I[g]) + CRATE_DX
@@ -251,12 +314,12 @@ export default function taps(): Chapter {
   const clock = new StoryClock({ rate: 0.2 })
   let layout = computeLayout(1440, 900)
 
-  const wall = makeTapWall({ taps: TAPS.map(t => t.spec), x: TAP_X })
-  let chalk: Chalkboard | null = null
+  const wall = makeTapWall({ taps: TAPS.map(t => t.spec), x: TAP_X, bays: BAYS })
+  let room: TapRoom
+  let bar: RoomKit
   const glasses: Glass[] = []
   let stream: ReturnType<typeof makePourStream>
   let streamG = 0
-  let bulbs: THREE.InstancedMesh
   let backGlow: THREE.Mesh
   const cards: ReturnType<typeof makeBacklight>[] = []
   let crate: Crate
@@ -291,14 +354,34 @@ export default function taps(): Chapter {
     anchors: ANCHORS,
 
     async init(ctx: ChapterContext) {
-      // ---- the room
-      const wallB = makeBrickWall(26, 6)
-      wallB.position.set(0.8, 2.6, -0.95)
-      ;(wallB.material as THREE.MeshStandardMaterial).color.set('#8a7066')
+      // ---- the room: Glory's back bar, built from the room kit (maps across frames first: no long task)
+      const chalk = makeChalkboard({ w: 0.36, title: TAPS_UI.drafts, label: TAPS_UI.lastUpdate, date: BAR.lastUpdate, count: `${BAR.taps} ${TAPS_UI.tap}s` })
+      const spec: TapRoomSpec = {
+        S,
+        wallZ: WALL_Z,
+        cols: COL_X,
+        colW: COL_W,
+        colD: COL_D,
+        counterFront: COUNTER_FRONT,
+        brickBay: [BAYS[1].x0, BAYS[1].x1],
+        ledgeCover: coverTexture({ title: BRAND.short, kicker: 'Glory Records', sub: BRAND.motto, cat: catNo(29), paper: 'amber' }),
+        chalk,
+        mobile: ctx.mobile,
+      }
+      await prepareRoom()
+      await prepareTapRoom(spec)
+      room = makeTapRoom(spec)
+      room.sleeve.group.name = 'taps-ledge-lp'
+      group.add(room.kit.group)
+      await nextFrame()
+      // the long oiled bar in front of the back counter, its black rubber rail along the drip trays
+      const runD = (1.6 - COUNTER_FRONT) / S
+      const runX0 = COL_X[0] - COL_W / 2 - 0.7 * S
+      const runX1 = END_E0 + 2.5 * S
+      bar = makeBarRun({ length: (runX1 - runX0) / S, depth: runD, height: ROOM.CY, scale: S, mobile: ctx.mobile })
+      bar.group.position.set((runX0 + runX1) / 2, -ROOM.CY * S, COUNTER_FRONT + (runD / 2) * S)
       wall.setEnv(ctx.world.envMap)
-      const counter = makeBarTop({ length: 22, depth: 2.6, thickness: 0.9 })
-      counter.position.set(0.8, 0, 0.3)
-      group.add(wallB, counter, wall.group)
+      group.add(bar.group, wall.group)
 
       // an amber wash on the backsplash: the light behind the glasses (beer glows, never murky)
       const gc = document.createElement('canvas')
@@ -313,31 +396,11 @@ export default function taps(): Chapter {
       gx.fillRect(0, 0, 8, 128)
       const glowTex = new THREE.CanvasTexture(gc)
       backGlow = new THREE.Mesh(
-        new THREE.PlaneGeometry(TAP_X[TAP_X.length - 1] - TAP_X[0] + 1.6, 1.2),
+        new THREE.PlaneGeometry(TAP_X[TAP_X.length - 1] - TAP_X[0] + 2 * MARGIN, 1.2),
         new THREE.MeshBasicMaterial({ map: glowTex, color: new THREE.Color('#ff9a48').multiplyScalar(0.3), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
       )
       backGlow.position.set((TAP_X[0] + WALL_R) / 2, 0.6, -0.935)
       group.add(backGlow)
-
-      // Edison bulbs hanging in front of the wall (foreground depth + glints)
-      const nB = 9
-      const bulbGeo = new THREE.SphereGeometry(0.07, 16, 12)
-      bulbGeo.scale(1, 1.35, 1)
-      bulbs = new THREE.InstancedMesh(bulbGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffb45e').multiplyScalar(2.4) }), nB)
-      const cordGeo = new THREE.CylinderGeometry(0.006, 0.006, 1, 5)
-      cordGeo.translate(0, 0.5, 0)
-      const cords = new THREE.InstancedMesh(cordGeo, new THREE.MeshStandardMaterial({ color: '#0b0908', roughness: 0.7 }), nB)
-      const mm = new THREE.Matrix4()
-      for (let i = 0; i < nB; i++) {
-        const bx = TAP_X[0] - 0.6 + (i / (nB - 1)) * (WALL_R - TAP_X[0] + 2.4) + Math.sin(i * 2.3) * 0.25
-        const by = 2.75 + Math.sin(i * 1.7) * 0.18
-        const bz = 0.25 + Math.cos(i * 1.3) * 0.2
-        mm.makeTranslation(bx, by, bz)
-        bulbs.setMatrixAt(i, mm)
-        mm.makeScale(1, 3, 1).setPosition(bx, by + 0.08, bz)
-        cords.setMatrixAt(i, mm)
-      }
-      group.add(bulbs, cords)
 
       // glasses (one per group, under its pouring faucet) + the stream
       for (let g = 0; g < POURS.length; g++) {
@@ -362,6 +425,7 @@ export default function taps(): Chapter {
       // ---- the record crate: the draft list as three LPs
       crate = makeCrate({ legend: ['GLORY RECORDS · DRAFTS', `${BAR.taps} ${TAPS_UI.tap.toUpperCase()}S`] })
       crate.group.position.set(stationX(0), 0, CRATE_Z)
+      crate.group.name = 'taps-crate'
       group.add(crate.group)
       const sleeves = DRAFTS.map((g, gi) => {
         const first = FIRST[gi]
@@ -407,19 +471,13 @@ export default function taps(): Chapter {
       await nextFrame()
 
       // canvas type: fonts first, redraw once all fonts settle
-      const fontsReady = Promise.all([
-        document.fonts.load('400 40px "Alfa Slab One"'),
-        document.fonts.load('600 20px "Inter Tight Variable"'),
-        document.fonts.load('italic 400 40px "Instrument Serif"'),
-      ]).catch(() => undefined)
+      const fontsReady = Promise.all([document.fonts.load('400 40px "Alfa Slab One"'), document.fonts.load('600 20px "Inter Tight Variable"')]).catch(() => undefined)
       await Promise.race([fontsReady, new Promise(r => setTimeout(r, 1500))])
       wall.drawLabels()
-      chalk = makeChalkboard({ w: 1.45, title: TAPS_UI.drafts, label: TAPS_UI.lastUpdate, date: BAR.lastUpdate, count: `${BAR.taps} ${TAPS_UI.tap.toLowerCase()}s` })
-      chalk.group.position.set(CHALK_X, 1.5, -0.93)
-      group.add(chalk.group)
+      chalk.redraw()
       document.fonts.ready.then(() => {
         wall.drawLabels()
-        chalk?.redraw()
+        chalk.redraw()
       })
       await nextFrame()
 
@@ -534,29 +592,51 @@ export default function taps(): Chapter {
       if (q > END_A - 0.02) tint = 0.45
       ctx.post.params.beer = tint
 
-      // ---- light: the spot follows the subject; rims behind the glass make beer glow
+      // ---- light: the room's own practicals (the sconces and pendants: the kit's light pools) set the
+      // mood; a product key follows the pour and the LP; rims behind the glass make the beer glow
       const shot = sampleShot(q)
       const w = ctx.world.params
+      w.room = 0.45
       w.brick = 0
-      w.bulbs = 0.4
-      w.cyc = 0.35
-      w.haze = 0.18
-      // cream sleeves bloom under a hot key: keep it moderate near the crate
-      w.spot = 0.5
-      ctx.post.params.bloomThreshold = 1.05
+      w.bulbs = 0.25
+      w.cyc = 0.1
+      w.haze = 0.06
+      // cream sleeves bloom under a hot key: moderate near the crate, lower (and a higher bloom
+      // threshold) while the cream American LP is up in front of the camera
+      let lp = 0
+      for (let g = 0; g < GROUPS.length; g++) {
+        const u = uOf(q, g)
+        lp = Math.max(lp, (g === 0 ? 1 : 0.5) * smoothstep(0.08, 0.2, u) * (1 - smoothstep(0.92, 1.04, u)))
+      }
+      // at the end the room's own bulbs light the boards (a hot key would flatten the chalk)
+      w.spot = (LIGHT.spot - (LIGHT.spot - LIGHT.spotCream) * lp) * (1 - 0.55 * smoothstep(END_A - 0.02, END_A + 0.02, q))
+      ctx.post.params.bloomThreshold = lerp(1.05, 1.4, lp)
+      w.spotColor = LIGHT.spotColor
       w.spotPos.set(shot.x + 1.4, 4.6, 3.2)
-      w.spotAt.set(shot.x - 0.1, 0.9, -0.6)
-      w.spotAngle = 0.58
-      w.spotPenumbra = 0.75
+      w.spotAt.set(shot.x - 0.1, 0.8, -0.2)
+      w.spotAngle = 0.4
+      w.spotPenumbra = 0.8
       w.rimA = 1.5
       w.rimAColor = '#ffb060'
       w.rimADir.set(-0.7, 0.35, -1)
       w.rimB = 0.9
       w.rimBColor = '#ffd6a0'
       w.rimBDir.set(0.85, 0.45, -0.9)
-      w.fill = 0.22
-      // the room's ambient stays low; steel, lacquer and glass carry their own reflections
-      w.env = 0.38
+      w.fill = LIGHT.fill
+      // steel, lacquer and glass carry their own reflections (the tap wall has its own env)
+      w.env = LIGHT.env
+      room.kit.setGlow(LIGHT.glow)
+      room.kit.setAmbient(LIGHT.amb)
+      // the bulbs themselves read brighter than the light they throw (ref1's sconces glow)
+      const rm0 = room.kit.materials
+      rm0.filament.color.multiplyScalar(LIGHT.filament)
+      rm0.glow.uniforms.uK.value *= LIGHT.halo
+      rm0.bulb.emissiveIntensity *= LIGHT.filament
+      // the silver duct reads silver after dark; the glass stand-ins stay glassy
+      rm0.duct.envMapIntensity = LIGHT.duct
+      rm0.glassware.opacity = 0.1
+      bar.setGlow(1)
+      bar.setAmbient(LIGHT.barAmb)
       syncVinylLights(ctx.world)
 
       // ---- HUD
