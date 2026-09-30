@@ -81,35 +81,6 @@
   margin-top: 6px;
 }
 
-/* during the pour: a compact caption bottom-left (the tagline stays) */
-.hero-stage .hero-pourcap {
-  position: absolute;
-  left: var(--gutter);
-  bottom: var(--safe-bottom);
-  max-width: min(420px, 40vw);
-  padding: 16px 20px 18px;
-  background: var(--panel);
-  border-left: 3px solid var(--glory);
-  border-radius: 2px;
-  visibility: hidden;
-  opacity: 0;
-}
-.hero-stage .hero-pourcap p {
-  margin: 0;
-}
-.hero-stage .hero-pourcap-name {
-  font-family: var(--font-display);
-  font-size: 2rem;
-  line-height: 1;
-  text-transform: uppercase;
-  color: var(--paper);
-  margin: 8px 0 8px !important;
-}
-.hero-stage .hero-pourcap-tag {
-  font-size: 15px;
-  color: var(--fg-muted);
-}
-
 /* the payoff: the motto returns with the CTAs (on the right: deck · glass · words) */
 .hero-stage .hero-payoff {
   position: absolute;
@@ -165,10 +136,6 @@
   .hero-stage .hero-bbk {
     font-size: clamp(0.95rem, 4.2vw, 1.6rem);
   }
-  .hero-stage .hero-pourcap {
-    max-width: none;
-    right: var(--gutter);
-  }
   .hero-stage .hero-motto {
     font-size: clamp(2.4rem, 11vw, 4.4rem);
   }
@@ -184,12 +151,6 @@
   .hero-stage .hero-ctas .hud-btn {
     padding: 12px 16px;
     font-size: 11px;
-  }
-  .hero-stage .hero-pourcap {
-    padding: 12px 14px 14px;
-  }
-  .hero-stage .hero-pourcap-name {
-    font-size: 1.5rem;
   }
 }
 
@@ -237,15 +198,5 @@
   }
   .hero-stage .hero-payoff {
     width: 38vw;
-  }
-  .hero-stage .hero-pourcap {
-    bottom: calc(52px + env(safe-area-inset-bottom, 0px));
-    padding: 10px 14px;
-  }
-  .hero-stage .hero-pourcap-name {
-    font-size: 1.3rem;
-  }
-  .hero-stage .hero-pourcap-tag {
-    font-size: 13px;
   }
 }

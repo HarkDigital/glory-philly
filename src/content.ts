@@ -486,8 +486,6 @@ export const EVENTS_UI = {
 /** Hero chapter UI labels (plain descriptive, not claims). */
 export const HERO_UI = {
   menu: 'See the menu',
-  /** the product-film caption during the pour */
-  pour: 'The first pour',
 }
 
 /** CELLAR chapter UI labels (plain, descriptive — not business claims). */

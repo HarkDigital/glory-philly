@@ -133,7 +133,6 @@ export default function create(): Chapter {
   // DOM
   let copy: HTMLElement
   let glory: HTMLElement
-  let pourCap: HTMLElement
   let payoff: HTMLElement
   let motto: HTMLElement
 
@@ -197,11 +196,6 @@ export default function create(): Chapter {
         b.addEventListener('click', () => window.__hark?.land('kitchen'))
       }
       cta(ctas)
-
-      pourCap = el('div', 'hero-pourcap', undefined, stage)
-      el('p', 'hud-label hero-pourcap-k', HERO_UI.pour, pourCap)
-      el('p', 'hero-pourcap-name', BRAND.short, pourCap)
-      el('p', 'hud-body hero-pourcap-tag', BRAND.tagline, pourCap)
 
       payoff = el('div', 'hero-payoff', undefined, stage)
       el('p', 'hud-eyebrow', BRAND.name, payoff)
@@ -349,7 +343,6 @@ export default function create(): Chapter {
       reveal(copy, vCopy, 0)
       copy.style.transform = `translate3d(${(-(1 - vCopy) * 70).toFixed(1)}px,0,0)`
       setRise(glory, reduced || l < 0.15)
-      reveal(pourCap, window01(l, 0.17, 0.7, 0.04))
       const vPay = window01(l, 0.745, 0.955, 0.035)
       reveal(payoff, vPay)
       setRise(motto, l > 0.75 && l < 0.95)
