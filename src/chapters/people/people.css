@@ -1,0 +1,256 @@
+/* THE CREW (people): framed prints on the brick, a bio panel beside each.
+   Everything scoped under .pp-stage. */
+
+.pp-stage .pp-safe {
+  position: absolute;
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  left: var(--gutter);
+  right: var(--gutter);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ---- the headline (over the wide shot of the wall) ---- */
+.pp-stage .pp-head {
+  position: absolute;
+  left: var(--gutter);
+  bottom: var(--safe-bottom);
+  max-width: min(820px, 62vw);
+  isolation: isolate;
+}
+/* a soft dark pool behind the words: the brick behind them stays readable */
+.pp-stage .pp-head::before {
+  content: '';
+  position: absolute;
+  inset: -70px -140px -50px -90px;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(8, 5, 4, 0.78), rgba(8, 5, 4, 0.55) 55%, rgba(8, 5, 4, 0));
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+.pp-stage .pp-head.is-on::before {
+  opacity: 1;
+}
+.pp-stage .pp-head .hud-eyebrow {
+  margin-bottom: 16px;
+}
+.pp-stage .pp-title {
+  font-size: clamp(2.3rem, 4.9vw, 5.1rem);
+  line-height: 0.98;
+}
+
+/* ---- the bio panels (desktop: a column beside the print) ---- */
+.pp-stage .pp-side {
+  position: absolute;
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  right: var(--gutter);
+  width: min(500px, 37vw);
+  display: grid;
+  align-items: center;
+}
+.pp-stage .pp-card {
+  grid-area: 1 / 1;
+  margin: 0;
+  padding: 28px 32px 30px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate3d(0, 14px, 0);
+  transition:
+    opacity 0.34s ease,
+    transform 0.5s cubic-bezier(0.2, 0.7, 0.3, 1),
+    visibility 0s linear 0.34s;
+}
+.pp-stage .pp-card.is-on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0.2s, 0.2s, 0s;
+}
+.pp-stage .pp-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin: 0 0 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--signal);
+  line-height: 1.4;
+}
+.pp-stage .pp-no {
+  color: var(--fg-faint);
+  letter-spacing: 0.08em;
+}
+.pp-stage .pp-name {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(2.1rem, 3.1vw, 3.2rem);
+  line-height: 1;
+  letter-spacing: -0.005em;
+  margin: 0;
+  color: var(--fg);
+}
+/* a short Glory-red stamp under the name */
+.pp-stage .pp-rule {
+  width: 42px;
+  height: 3px;
+  margin: 18px 0 18px;
+  background: var(--glory);
+  border-radius: 2px;
+}
+.pp-stage .pp-bio {
+  display: grid;
+}
+.pp-stage .pp-bio p {
+  font-family: var(--font-sans);
+  font-weight: 420;
+  font-size: clamp(15px, 1.06vw, 16.5px);
+  line-height: 1.6;
+  color: var(--fg-muted);
+  margin: 0;
+  text-wrap: pretty;
+}
+.pp-stage .pp-bio p + p {
+  margin-top: 0.85em;
+}
+/* when the whole bio can't fit (small phones, short landscape) its
+   paragraphs take turns in the same place */
+.pp-stage .pp-card.is-paged .pp-pg {
+  grid-area: 1 / 1;
+  margin: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.3s ease,
+    visibility 0s linear 0.3s;
+}
+.pp-stage .pp-card.is-paged .pp-pg.is-page {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0.18s, 0s;
+}
+.pp-stage .pp-page {
+  display: none;
+  margin: 14px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--fg-faint);
+}
+.pp-stage .pp-card.is-paged .pp-page {
+  display: block;
+}
+
+/* ---- portrait screens: the print on top, the panel below ---- */
+@media (max-aspect-ratio: 19/20) {
+  .pp-stage .pp-side {
+    left: var(--gutter);
+    right: var(--gutter);
+    width: auto;
+    align-items: end;
+    justify-items: center;
+  }
+  .pp-stage .pp-card {
+    width: 100%;
+    max-width: 640px;
+    padding: 18px 20px 20px;
+  }
+  .pp-stage .pp-meta {
+    margin-bottom: 8px;
+    font-size: 11px;
+  }
+  .pp-stage .pp-name {
+    font-size: clamp(1.7rem, 7.4vw, 2.6rem);
+  }
+  .pp-stage .pp-rule {
+    margin: 12px 0 12px;
+  }
+  .pp-stage .pp-bio p {
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .pp-stage .pp-head {
+    right: var(--gutter);
+    max-width: none;
+  }
+  .pp-stage .pp-head::before {
+    inset: -60px -40px -40px -40px;
+  }
+  .pp-stage .pp-title {
+    font-size: clamp(2.2rem, 10vw, 3.6rem);
+  }
+}
+@media (max-aspect-ratio: 19/20) and (min-width: 700px) {
+  .pp-stage .pp-card {
+    padding: 24px 28px 26px;
+  }
+  .pp-stage .pp-bio p {
+    font-size: 16px;
+    line-height: 1.58;
+  }
+}
+
+/* ---- short landscape (phones sideways, 200% zoom) ---- */
+@media (orientation: landscape) and (max-height: 500px) {
+  .pp-stage .pp-side {
+    width: min(62vw, 560px);
+  }
+  .pp-stage .pp-card {
+    padding: 12px 16px 14px;
+  }
+  .pp-stage .pp-card.hud-panel::before {
+    top: 3px;
+  }
+  .pp-stage .pp-meta {
+    margin-bottom: 4px;
+    font-size: 10.5px;
+  }
+  .pp-stage .pp-name {
+    font-size: 22px;
+  }
+  .pp-stage .pp-rule {
+    margin: 8px 0 8px;
+    height: 2px;
+  }
+  .pp-stage .pp-bio p {
+    font-size: 15px;
+    line-height: 1.42;
+  }
+  .pp-stage .pp-page {
+    margin-top: 6px;
+  }
+  .pp-stage .pp-head {
+    max-width: 70vw;
+  }
+  .pp-stage .pp-head .hud-eyebrow {
+    margin-bottom: 8px;
+  }
+  .pp-stage .pp-title {
+    font-size: clamp(1.8rem, 5vw, 2.6rem);
+  }
+}
+
+/* reduced motion / Motion off: panels simply appear */
+@media (prefers-reduced-motion: reduce) {
+  .pp-stage .pp-card,
+  .pp-stage .pp-card.is-on,
+  .pp-stage .pp-card.is-paged .pp-pg {
+    transition-delay: 0s !important;
+    transform: none;
+  }
+}
+html.motion-off .pp-stage .pp-card,
+html.motion-off .pp-stage .pp-card.is-on,
+html.motion-off .pp-stage .pp-card.is-paged .pp-pg {
+  transition-delay: 0s !important;
+  transform: none;
+}
+
+/* the prints hang close: an almost opaque panel so no face shows through the text */
+.pp-stage .pp-card.hud-panel {
+  background: rgba(14, 9, 7, 0.985);
+}

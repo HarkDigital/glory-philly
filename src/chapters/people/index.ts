@@ -1,8 +1,496 @@
-import { BRAND, SECTIONS } from '../../content'
-import { BEERS } from '../../kit/beer'
-import { placeholder } from '../placeholder'
+import * as THREE from 'three'
+import type { Chapter, ChapterContext, Frame, CameraPose } from '../../core/types'
+import { el, rise, setRise } from '../../core/dom'
+import { ease, lerp, segment, smoothstep, damp } from '../../core/math'
+import { nextFrame } from '../../core/yield'
+import { PEOPLE, SECTIONS, MASCOT } from '../../content'
+import { makeGlass, BEERS, type Glass } from '../../kit/beer'
+import { whenRevealed } from '../../kit/images'
+import { StoryClock } from '../../kit/pace'
+import { GEL } from '../../world/World'
+import { makeWall, makeFramed, makeLedge, FRAME_X, FRAME_Y, LAMP_ABOVE, type Framed } from './wall'
+import { loadPhoto } from './print'
+import './people.css'
 
-// PLACEHOLDER — replaced by this chapter's build.
-void BRAND
-void SECTIONS
-export default () => placeholder('people', SECTIONS.people.eyebrow, SECTIONS.people.title, BEERS.stout, [0.3, 0.55, 0.8])
+/*
+ * THE CREW — Resonance's "Liner Notes" became the wall of the bar.
+ *
+ * Three black-and-white portraits hang as framed silver-gelatin prints on
+ * Glory's exposed brick, each under a brass picture light, with a pint of
+ * stout on the ledge below. The camera glides from frame to frame (paced by a
+ * StoryClock, never faster than ~0.5 s a move) and each person's name, role
+ * and bio sit in a panel beside the print (phones: the print on top, the bio
+ * below). A bio that can't fit at once (small phones, short landscape) is
+ * set in pages — whole sentences, packed by measurement — that take turns in
+ * the panel while the print holds.
+ *
+ *   0.00–0.17  in-beat → the wall: a slow dolly onto all three frames;
+ *              "About / The people behind the bar." (intro 0.07)
+ *   0.17–0.245 glide to Dave         · 0.24–0.425 Dave's panel
+ *   0.42–0.49  glide to Kevin Wieman · 0.485–0.695 Kevin's panel
+ *   0.69–0.76  glide to Pier Mutovic · 0.755–0.90 Pier's panel
+ *   0.895–1.00 out-beat: the camera cranes down to the stout on the ledge
+ *              (post beer → 1, the pour into the Back Room is a stout)
+ *
+ * Portrait photos are shown as shot: aspect kept (cover-cropped if ever
+ * mismatched, never stretched), no effects on the faces, only the lamp's
+ * gentle falloff and a glass that reflects the studio strips while the
+ * camera moves.
+ */
+
+/** image aspects (w/h) of the portrait files, so frames can be built before the photos arrive */
+const ASPECT: Record<string, number> = { dave: 571 / 688, kevin: 800 / 1200, pier: 480 / 600 }
+const MASCOT_ASPECT = 517 / 640
+
+/** glide windows between poses (q = time-paced local) */
+const GLIDES: [number, number][] = [
+  [0.17, 0.245], // wide → Dave
+  [0.42, 0.49], // Dave → Kevin
+  [0.69, 0.76], // Kevin → Pier
+  [0.895, 0.97], // Pier → the stout
+]
+/** when each panel shows: [on, off) */
+const HEAD: [number, number] = [0.035, 0.17]
+const CARDS: [number, number][] = [
+  [0.24, 0.425],
+  [0.485, 0.695],
+  [0.755, 0.9],
+]
+/** hold ranges (for the slow push-in while a print is up) */
+const HOLDS: [number, number][] = [
+  [0.0, 0.17],
+  [0.245, 0.42],
+  [0.49, 0.69],
+  [0.76, 0.895],
+  [0.97, 1.0],
+]
+
+const PINT_X = FRAME_X[2] + 1.15
+
+interface Card {
+  root: HTMLElement
+  parts: HTMLElement[]
+  /** the bio, paragraph by paragraph, sentence by sentence (verbatim) */
+  text: string[][]
+  bio: HTMLElement
+  pages: HTMLElement[]
+  pageNo: HTMLElement
+  on: boolean
+  curPage: number
+  /** layout (stage px), measured on resize */
+  top: number
+  left: number
+}
+
+interface Pose {
+  pos: THREE.Vector3
+  tgt: THREE.Vector3
+  /** picture-light levels for the three prints */
+  lamps: [number, number, number]
+}
+
+const mkPose = (): Pose => ({ pos: new THREE.Vector3(), tgt: new THREE.Vector3(), lamps: [0, 0, 0] })
+
+export default function create(): Chapter {
+  const group = new THREE.Group()
+  const clock = new StoryClock({ rate: 0.12 })
+  let q = 0
+  let reduced = false
+
+  const frames: Framed[] = []
+  let mascot: Framed
+  let pint: Glass
+
+  // DOM
+  let head: HTMLElement
+  let headParts: HTMLElement[] = []
+  let headOn = false
+  const cards: Card[] = []
+  let safeEl: HTMLElement
+  let stageEl: HTMLElement
+  const L = { W: 1, H: 1, safeTop: 80, safeBottom: 82, gutter: 24, headTop: 600, portrait: false }
+  let dirty = true
+
+  // pose scratch
+  const poses = { wide: mkPose(), p: [mkPose(), mkPose(), mkPose()], pint: mkPose() }
+  const A = mkPose()
+  const B = mkPose()
+  const cur = mkPose()
+
+  /* ------------------------------------------------------------ layout */
+
+  const portraitMQ = typeof matchMedia !== 'undefined' ? matchMedia('(max-aspect-ratio: 19/20)') : null
+
+  function measure() {
+    dirty = false
+    const r = stageEl.getBoundingClientRect()
+    L.W = Math.max(1, r.width)
+    L.H = Math.max(1, r.height)
+    L.portrait = portraitMQ ? portraitMQ.matches : L.W / L.H < 0.95
+    L.safeTop = safeEl.offsetTop
+    L.gutter = safeEl.offsetLeft
+    L.safeBottom = L.H - (safeEl.offsetTop + safeEl.offsetHeight)
+    L.headTop = head.offsetTop
+    const avail = L.H - L.safeTop - L.safeBottom
+    for (const c of cards) {
+      paginate(c, L.portrait ? avail * 0.64 : avail)
+      const side = c.root.parentElement as HTMLElement
+      c.top = side.offsetTop + c.root.offsetTop
+      c.left = side.offsetLeft + c.root.offsetLeft
+    }
+  }
+
+  /** render pages: each page is a list of paragraphs, each a list of sentences */
+  function renderPages(c: Card, pages: string[][][]) {
+    c.bio.textContent = ''
+    c.pages = pages.map(pg => {
+      const d = el('div', 'pp-pg', undefined, c.bio)
+      for (const para of pg) el('p', '', para.join(' '), d)
+      return d
+    })
+    c.root.classList.toggle('is-paged', pages.length > 1)
+    c.curPage = -1
+    applyPage(c, 0)
+  }
+
+  /**
+   * Fit the bio into `limit` px of panel height: all of it if it fits,
+   * otherwise whole sentences packed greedily into pages (measured).
+   */
+  function paginate(c: Card, limit: number) {
+    renderPages(c, [c.text])
+    if (c.root.offsetHeight <= limit) return
+    c.root.classList.add('is-paged')
+    const pages: string[][][] = []
+    let cur: string[][] = []
+    const fits = (pg: string[][]) => {
+      renderPages(c, [pg])
+      c.root.classList.add('is-paged')
+      return c.root.offsetHeight <= limit
+    }
+    for (const para of c.text) {
+      let run: string[] = []
+      for (const sen of para) {
+        const tryPg = [...cur, [...run, sen]]
+        if (fits(tryPg) || (cur.length === 0 && run.length === 0)) {
+          run.push(sen)
+        } else {
+          if (run.length) cur.push(run)
+          pages.push(cur)
+          cur = []
+          run = [sen]
+        }
+      }
+      if (run.length) cur.push(run)
+    }
+    if (cur.length) pages.push(cur)
+    renderPages(c, pages)
+  }
+
+  function applyPage(c: Card, i: number) {
+    if (c.curPage === i) return
+    c.curPage = i
+    c.pages.forEach((p, k) => p.classList.toggle('is-page', k === i))
+    c.pageNo.textContent = `${i + 1} / ${c.pages.length}`
+  }
+
+  /**
+   * Fit a world box (on the wall plane) into a screen rect: camera straight
+   * on, the box centred in the rect. `swing`/`lift` angle the view a touch
+   * (fractions of the distance).
+   */
+  function fit(out: Pose, cx: number, cy: number, bw: number, bh: number, z: number, x0: number, y0: number, x1: number, y1: number, fill: number, fov: number, swing: number, lift: number) {
+    const tanV = Math.tan(THREE.MathUtils.degToRad(fov / 2))
+    const rw = Math.max(40, x1 - x0)
+    const rh = Math.max(60, y1 - y0)
+    const ppu = Math.min((rh * fill) / bh, (rw * fill) / bw)
+    const d = L.H / (2 * tanV * ppu)
+    const nx = (x0 + x1) / L.W - 1
+    const ny = 1 - (y0 + y1) / L.H
+    const halfH = d * tanV
+    const halfW = (halfH * L.W) / L.H
+    out.tgt.set(cx - nx * halfW, cy - ny * halfH, z)
+    out.pos.set(out.tgt.x + swing * d, out.tgt.y + lift * d, z + d)
+  }
+
+  function buildPoses() {
+    const { W, H, safeTop, safeBottom, gutter } = L
+    const fov = L.portrait ? 34 : 30
+    // the wall: all three frames (and the ledge) above the headline
+    const wideTop = 4.25
+    const wideBot = -0.25
+    const y1 = Math.max(safeTop + 120, L.headTop - 14)
+    // (portrait: Kevin and the bulldog whole, Dave and Pier cut by the edges)
+    const wideW = L.portrait ? 8.4 : FRAME_X[2] - FRAME_X[0] + 2.7
+    fit(poses.wide, FRAME_X[1] + (L.portrait ? 0.6 : 0), (wideTop + wideBot) / 2, wideW, wideTop - wideBot, 0, gutter, safeTop, W - gutter, y1, L.portrait ? 1.0 : 0.96, fov, -0.02, 0.03)
+    poses.wide.lamps = [0.8, 0.8, 0.8]
+    // each print: beside its panel (desktop) or above it (portrait)
+    for (let i = 0; i < 3; i++) {
+      const f = frames[i]
+      const c = cards[i]
+      const bh = f.height + LAMP_ABOVE + 0.3
+      const cy = FRAME_Y + (LAMP_ABOVE + 0.2) / 2
+      if (L.portrait) {
+        const bot = Math.max(safeTop + 110, c.top - 14)
+        fit(poses.p[i], FRAME_X[i], cy, f.width + 0.3, bh, 0.05, gutter, safeTop + 2, W - gutter, bot, 0.94, fov, 0.035, 0.02)
+      } else {
+        const right = Math.max(gutter + 160, c.left - 28)
+        fit(poses.p[i], FRAME_X[i], cy, f.width + 0.3, bh, 0.05, gutter, safeTop, right, H - safeBottom, 0.9, fov, 0.05, 0.03)
+      }
+      poses.p[i].lamps = [0.3, 0.3, 0.3]
+      poses.p[i].lamps[i] = 1
+    }
+    // the stout on the ledge, low and close
+    fit(poses.pint, PINT_X, 0.42, 1.5, 1.3, 0.2, gutter, safeTop, W - gutter, H - safeBottom, 0.62, fov, -0.12, 0.12)
+    poses.pint.lamps = [0.3, 0.3, 0.55]
+  }
+
+  const copyPose = (o: Pose, s: Pose) => {
+    o.pos.copy(s.pos)
+    o.tgt.copy(s.tgt)
+    o.lamps[0] = s.lamps[0]
+    o.lamps[1] = s.lamps[1]
+    o.lamps[2] = s.lamps[2]
+  }
+  const lerpPose = (o: Pose, a: Pose, b: Pose, t: number) => {
+    o.pos.lerpVectors(a.pos, b.pos, t)
+    o.tgt.lerpVectors(a.tgt, b.tgt, t)
+    for (let i = 0; i < 3; i++) o.lamps[i] = lerp(a.lamps[i], b.lamps[i], t)
+  }
+  /** a hold: a slow push toward the subject (0 at the start of the hold .. 1 at its end) */
+  const push = (o: Pose, k: number) => {
+    const s = lerp(1.035, 0.985, k)
+    o.pos.sub(o.tgt).multiplyScalar(s).add(o.tgt)
+  }
+
+  const seq = () => [poses.wide, poses.p[0], poses.p[1], poses.p[2], poses.pint]
+
+  function poseAt(qq: number, out: Pose) {
+    const list = seq()
+    for (let i = 0; i < GLIDES.length; i++) {
+      const [g0, g1] = GLIDES[i]
+      if (qq < g0) {
+        // holding pose i
+        const [h0, h1] = HOLDS[i]
+        copyPose(out, list[i])
+        push(out, segment(qq, h0, h1))
+        return
+      }
+      if (qq < g1) {
+        const t = ease.inOutCubic(segment(qq, g0, g1))
+        copyPose(A, list[i])
+        push(A, 1)
+        copyPose(B, list[i + 1])
+        push(B, 0)
+        lerpPose(out, A, B, t)
+        // a glide arcs gently off the wall (a dolly, not a pan)
+        const arc = Math.sin(t * Math.PI)
+        out.pos.z += arc * 0.9
+        return
+      }
+    }
+    copyPose(out, poses.pint)
+    push(out, segment(qq, HOLDS[4][0], HOLDS[4][1]))
+  }
+
+  /* --------------------------------------------------------------- DOM */
+
+  function buildDom(stage: HTMLElement) {
+    stageEl = stage
+    stage.classList.add('pp-stage')
+    safeEl = el('div', 'pp-safe', undefined, stage)
+    head = el('div', 'pp-head', undefined, stage)
+    const eb = el('p', 'hud-eyebrow', undefined, head)
+    const ebT = rise(el('span', '', undefined, eb), SECTIONS.people.eyebrow)
+    const title = SECTIONS.people.title
+    const html = title.replace(/(\S+)$/, '<em>$1</em>')
+    const h = rise(el('h2', 'hud-h2 pp-title', undefined, head), html)
+    headParts = [ebT, h]
+
+    const side = el('div', 'pp-side', undefined, stage)
+    PEOPLE.forEach((p, i) => {
+      const root = el('article', 'pp-card hud-panel', undefined, side)
+      const meta = el('p', 'pp-meta', undefined, root)
+      el('span', 'pp-no', `${String(i + 1).padStart(2, '0')} / ${String(PEOPLE.length).padStart(2, '0')}`, meta)
+      const role = rise(el('span', 'pp-role', undefined, meta), p.role)
+      const name = rise(el('h3', 'pp-name', undefined, root), p.name)
+      el('div', 'pp-rule', undefined, root)
+      const bio = el('div', 'pp-bio', undefined, root)
+      const pageNo = el('p', 'pp-page', undefined, root)
+      // sentences (no lookbehind: Safari 15) — the words stay verbatim
+      const text = p.bio.map(b => (b.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) ?? [b]).map(x => x.trim()))
+      const card: Card = { root, parts: [role, name], text, bio, pages: [], pageNo, on: false, curPage: 0, top: 0, left: 0 }
+      renderPages(card, [text])
+      cards.push(card)
+    })
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => (dirty = true))
+      ro.observe(stage)
+      ro.observe(head)
+      for (const c of cards) ro.observe(c.root)
+    }
+    addEventListener('resize', () => (dirty = true))
+    document.fonts?.ready.then(() => (dirty = true))
+  }
+
+  function setCard(c: Card, on: boolean) {
+    if (c.on === on) return
+    c.on = on
+    c.root.classList.toggle('is-on', on)
+    for (const p of c.parts) setRise(p, on)
+  }
+
+  function updateDom(qq: number) {
+    const hOn = qq >= HEAD[0] && qq < HEAD[1]
+    if (hOn !== headOn) {
+      headOn = hOn
+      head.classList.toggle('is-on', hOn)
+    }
+    for (const p of headParts) setRise(p, hOn)
+    cards.forEach((c, i) => {
+      const [a, b] = CARDS[i]
+      setCard(c, qq >= a && qq < b)
+      const n = c.pages.length
+      if (n > 1) applyPage(c, Math.min(n - 1, Math.max(0, Math.floor(((qq - a) / (b - a)) * n))))
+    })
+  }
+
+  /* ------------------------------------------------------------ chapter */
+
+  return {
+    id: 'people',
+    group,
+    // 0 Dave · 1 Kevin Wieman (on his first page) · 2 Pier Mutovic
+    anchors: [0.33, 0.535, 0.83],
+    busy: () => clock.busy,
+
+    async init(ctx: ChapterContext) {
+      reduced = ctx.reducedMotion
+      buildDom(ctx.stage)
+
+      const wall = makeWall(64, 40)
+      wall.position.set(FRAME_X[1], 6, 0)
+      group.add(wall)
+      await nextFrame()
+
+      PEOPLE.forEach((p, i) => {
+        const f = makeFramed({ aspect: ASPECT[p.id] ?? 0.8, seed: i })
+        f.group.position.set(FRAME_X[i], FRAME_Y, 0)
+        group.add(f.group)
+        frames.push(f)
+      })
+      mascot = makeFramed({ aspect: MASCOT_ASPECT, printH: 0.78, mat: 0.13, mold: 0.06, lamp: false, seed: 3 })
+      mascot.group.position.set((FRAME_X[1] + FRAME_X[2]) / 2, 3.55, 0)
+      mascot.group.rotation.z = -0.012
+      group.add(mascot.group)
+
+      const ledge = makeLedge(FRAME_X[2] - FRAME_X[0] + 5)
+      ledge.position.set(FRAME_X[1], 0, 0)
+      group.add(ledge)
+
+      pint = makeGlass({ shape: 'pint', beer: BEERS.stout, scale: 0.72, fill: 0.95, head: 0.09 })
+      pint.group.position.set(PINT_X, 0, 0.21)
+      group.add(pint.group)
+      await nextFrame()
+
+      // photos: Dave now, the rest once the site has revealed (never block init)
+      const load = (url: string, target: Framed) =>
+        loadPhoto(url)
+          .then(({ tex, aspect }) => target.print.setImage(tex, aspect))
+          .catch(() => {
+            /* the print stays as bare paper */
+          })
+      void load(PEOPLE[0].photo, frames[0])
+      void whenRevealed().then(() => {
+        PEOPLE.slice(1).forEach((p, k) => void load(p.photo, frames[k + 1]))
+        void load(MASCOT.photo, mascot)
+      })
+    },
+
+    onEnter() {
+      clock.reset()
+      dirty = true
+    },
+
+    update(local: number, frame: Frame, ctx: ChapterContext) {
+      reduced = frame.reducedMotion
+      q = clock.update(local, frame.dt)
+      if (dirty) measure()
+      buildPoses()
+      poseAt(q, cur)
+      updateDom(q)
+
+      // prints: the photo fades in over the paper once it arrives
+      const all = [...frames, mascot]
+      for (const f of all) {
+        const target = f.print.loaded ? 1 : 0
+        f.print.has = reduced ? target : damp(f.print.has, target, 5, frame.dt)
+        if (f.print.has > 0.999) f.print.has = 1
+        f.print.material.uniforms.uHas.value = f.print.has
+      }
+      // picture lights: the print in focus is lit, the others glow low
+      const moving = GLIDES.some(([a, b]) => q > a && q < b) ? 1 : 0
+      frames.forEach((f, i) => {
+        const lv = cur.lamps[i]
+        if (f.lamp) f.lamp.intensity = 4.5 * lv
+        if (f.lampGlow) f.lampGlow.emissiveIntensity = 0.35 + 1.5 * lv
+        f.print.material.uniforms.uLit.value = 0.6 + 0.4 * lv
+        f.glint.set(0.55 + 0.45 * moving)
+      })
+      mascot.print.material.uniforms.uLit.value = 0.62
+      mascot.glint.set(0.8)
+
+      const w = ctx.world.params
+      w.top = '#0e0806'
+      w.bottom = '#040201'
+      w.cyc = 0
+      w.brick = 0
+      w.bulbs = 0
+      w.haze = 0
+      w.bokeh = 0
+      w.beams = 0
+      // the key: a dim tungsten spot from high front-left, following the camera
+      w.spot = 0.24
+      w.spotColor = GEL.tungsten
+      w.spotPos.set(cur.tgt.x - 3.5, 8.5, 8)
+      w.spotAt.set(cur.tgt.x, 1.4, 0)
+      w.spotAngle = 0.55
+      w.spotPenumbra = 0.85
+      w.rimA = 0.55
+      w.rimAColor = GEL.amber
+      w.rimADir.set(-0.7, 0.45, -1)
+      w.rimB = 0.3
+      w.rimBColor = GEL.tungsten
+      w.rimBDir.set(0.85, 0.2, -1)
+      w.fill = 0.1
+      w.env = 0.7
+      w.envTurn = 0.3
+
+      const p = ctx.post.params
+      // the pour: stout (the pint on the ledge) into the Back Room
+      p.beer = lerp(0.82, 1, smoothstep(0.55, 0.95, local))
+      p.vignette = 0.4
+      p.grain = 0.05
+      p.bloomThreshold = 0.95
+      p.bloomStrength = 0.3
+      p.warmth = 0.5
+
+      // idle: the foam is still; the glass just sits there
+      pint.group.rotation.y = 0.4
+    },
+
+    camera(_local: number, frame: Frame, out: CameraPose) {
+      out.position.copy(cur.pos)
+      out.target.copy(cur.tgt)
+      if (!frame.reducedMotion) {
+        const t = frame.time
+        out.position.x += Math.sin(t * 0.21) * 0.04
+        out.position.y += Math.sin(t * 0.17 + 1.3) * 0.025
+      }
+      out.fov = L.portrait ? 34 : 30
+      out.roll = 0
+      out.parallax = frame.reducedMotion ? 0 : 0.12
+    },
+  }
+}
