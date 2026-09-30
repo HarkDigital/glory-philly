@@ -2,7 +2,7 @@ import { BRAND, EVENTS, FEATURED_DISHES, LINKS, MASCOT, PEOPLE, PHOTOS } from '.
 import { CHAPTER_COPY_IDS, buildChapterCopy } from '../core/srContent'
 import { CHAPTERS, NAV_NAMES } from '../chapters/index'
 import { WORDMARK, roundelSvg } from './mark'
-import { hoursSummary } from './chrome'
+import { EXT_IC, MENU_LINKS, hoursSummary } from './chrome'
 import { unmountRotateGate } from './rotate'
 import { releaseInert } from './inert'
 import { releaseScene } from './prefs'
@@ -74,9 +74,15 @@ export function renderFallback(root: HTMLElement) {
   // children, around <main> (#track), which holds only the chapters
   document.querySelectorAll('body > .fb-top, body > .fb-foot').forEach(n => n.remove())
   const has = (id: string) => CHAPTERS.some(c => c.id === id) && CHAPTER_COPY_IDS.includes(id)
+  // as the live chrome: Bar and Kitchen open gloryphilly.com's printable menu in a
+  // new tab (Mike's call); Events and Visit stay on the page
   const nav = ['taps', 'kitchen', 'events', 'visit']
     .filter(has)
-    .map(id => `<a href="#${id}">${esc(NAV_NAMES[id] ?? id)}</a>`)
+    .map(id =>
+      MENU_LINKS[id]
+        ? `<a class="fb-ext" href="${esc(LINKS.menus.url)}" target="_blank" rel="noopener" aria-label="${esc(MENU_LINKS[id])} (opens in a new tab)">${esc(NAV_NAMES[id] ?? id)}${EXT_IC}</a>`
+        : `<a href="#${id}">${esc(NAV_NAMES[id] ?? id)}</a>`,
+    )
     .join('')
   const header = document.createElement('header')
   header.className = 'fb-top'

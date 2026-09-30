@@ -109,6 +109,40 @@ const FLAME_FRAG = /* glsl */ `
   }
 `
 
+/**
+ * A cheap goblet for the stand-ins: the kit glass's own lathe profile (its
+ * outer wall, rim and inner wall), thinned by Ramer–Douglas–Peucker to the
+ * points that shape it, turned with `radial` segments (~600 triangles, not
+ * the kit shell's 17k).
+ */
+function standInGoblet(kitShell: THREE.BufferGeometry, radial: number): THREE.BufferGeometry {
+  const src = (kitShell as THREE.LatheGeometry).parameters?.points
+  if (!src?.length) return new THREE.CylinderGeometry(0.2, 0.14, 0.55, radial).translate(0, 0.28, 0)
+  const rdp = (pts: THREE.Vector2[], eps: number): THREE.Vector2[] => {
+    if (pts.length < 3) return pts
+    const a = pts[0]
+    const b = pts[pts.length - 1]
+    const ab = b.clone().sub(a)
+    const len = ab.length() || 1e-6
+    let worst = 0
+    let at = 0
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = Math.abs(ab.x * (pts[i].y - a.y) - ab.y * (pts[i].x - a.x)) / len
+      if (d > worst) {
+        worst = d
+        at = i
+      }
+    }
+    if (worst <= eps) return [a, b]
+    return [...rdp(pts.slice(0, at + 1), eps).slice(0, -1), ...rdp(pts.slice(at), eps)]
+  }
+  let eps = 0.004
+  let pts = rdp(src, eps)
+  // aim for ~12–18 profile points whatever the kit's smoothing does
+  while (pts.length > 18 && eps < 0.05) pts = rdp(src, (eps *= 1.4))
+  return new THREE.LatheGeometry(pts, radial)
+}
+
 export function makeBanquetTable(mobile: boolean, lit: (m: THREE.Mesh | THREE.InstancedMesh) => void = () => {}): BanquetTable {
   const group = new THREE.Group()
   const R = rng(7)
@@ -271,7 +305,9 @@ export function makeBanquetTable(mobile: boolean, lit: (m: THREE.Mesh | THREE.In
     group.add(g.group)
     glasses.push(g)
   }
-  const shell = glasses[0].glass.geometry
+  // (their own low-poly goblet: the kit's shell is a 96-segment lathe, 17k triangles, and 24 of
+  // them were over half of every frame here; at 2–20 px on screen ~600 triangles read the same)
+  const shell = standInGoblet(glasses[0].glass.geometry, mobile ? 14 : 18)
   const stand = new THREE.InstancedMesh(
     shell,
     new THREE.MeshStandardMaterial({

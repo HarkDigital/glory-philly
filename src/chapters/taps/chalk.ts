@@ -39,8 +39,29 @@ export function makeChalkboard({ w = 0.36, title, label, date, count }: { w?: nu
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 8
 
-  const tracked = (g: CanvasRenderingContext2D, px: number) => {
-    ;(g as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = `${px}px`
+  /**
+   * Tracked text (centred on x, like native letterSpacing: the spacing follows every glyph, the
+   * last included). Canvas letterSpacing is missing in older Safari (the build targets Safari 15):
+   * there, set the glyphs one by one.
+   */
+  const trackedText = (g: CanvasRenderingContext2D, text: string, x: number, y: number, px: number) => {
+    const gg = g as CanvasRenderingContext2D & { letterSpacing?: string }
+    if (px === 0 || 'letterSpacing' in gg) {
+      if ('letterSpacing' in gg) gg.letterSpacing = `${px}px`
+      g.fillText(text, x, y)
+      if ('letterSpacing' in gg) gg.letterSpacing = '0px'
+      return
+    }
+    const glyphs = Array.from(text)
+    const widths = glyphs.map(c => g.measureText(c).width)
+    let cx = x - (widths.reduce((a, b) => a + b, 0) + px * glyphs.length) / 2
+    const align = g.textAlign
+    g.textAlign = 'left'
+    glyphs.forEach((c, i) => {
+      g.fillText(c, cx, y)
+      cx += widths[i] + px
+    })
+    g.textAlign = align
   }
   const redraw = () => {
     const g = cv.getContext('2d')!
@@ -63,23 +84,18 @@ export function makeChalkboard({ w = 0.36, title, label, date, count }: { w?: nu
     g.textAlign = 'center'
     g.textBaseline = 'alphabetic'
     g.fillStyle = '#f1ece0'
-    tracked(g, 2)
     g.font = `400 112px ${FONT.display}`
-    g.fillText(title, CW / 2, 172)
+    trackedText(g, title, CW / 2, 172, 2)
     g.fillStyle = '#f0a53a'
     g.fillRect(CW / 2 - 150, 214, 300, 5)
     g.fillStyle = '#f1ece0'
-    tracked(g, 14)
     g.font = `600 40px ${FONT.sans}`
-    g.fillText(label.toUpperCase(), CW / 2 + 7, 318)
-    tracked(g, 0)
+    trackedText(g, label.toUpperCase(), CW / 2 + 7, 318, 14)
     g.font = `400 124px ${FONT.display}`
     g.fillText(date, CW / 2, 468)
     g.fillStyle = '#e8c07a'
-    tracked(g, 12)
     g.font = `600 44px ${FONT.sans}`
-    g.fillText(count.toUpperCase(), CW / 2 + 6, 604)
-    tracked(g, 0)
+    trackedText(g, count.toUpperCase(), CW / 2 + 6, 604, 12)
     // chalk grain: knock specks out of everything drawn
     g.globalCompositeOperation = 'destination-out'
     for (let i = 0; i < 9000; i++) {

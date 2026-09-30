@@ -126,8 +126,10 @@ class LabCityWide implements Chapter {
   private cw!: CityWide
   private card!: ReturnType<typeof backBarCard>
   private backlight!: ReturnType<typeof makeBacklight>
-  private closed = makeCan({ labelRes: 1024, mouthYaw: -0.4 })
-  private bottle = makeRyeBottle(VIEW === 'pour' ? { fill: 1, cap: false } : { fill: 0.85 })
+  // the extra can and the bottle only in the views that show them: the kit frees a piece's art
+  // canvases once they're uploaded, so a piece that's never drawn would hold them for good
+  private closed = VIEW === 'all' || VIEW === 'pour' ? makeCan({ labelRes: 1024, mouthYaw: -0.4 }) : null
+  private bottle = VIEW === 'all' || VIEW === 'pour' ? makeRyeBottle(VIEW === 'pour' ? { fill: 1, cap: false } : { fill: 0.85 }) : null
   private pour = makeRyePour()
   private labelPlane: THREE.Mesh | null = null
   private v = new THREE.Vector3()
@@ -161,7 +163,7 @@ class LabCityWide implements Chapter {
     })
     this.group.add(this.backlight.mesh)
 
-    if (VIEW === 'all' || VIEW === 'pour') {
+    if (this.closed && this.bottle) {
       this.closed.group.position.set(VIEW === 'pour' ? -0.95 : -1.15, 0, -0.25)
       this.closed.group.rotation.y = -0.5
       this.group.add(this.closed.group)
@@ -222,7 +224,7 @@ class LabCityWide implements Chapter {
     this.backlight.set(0.2)
     this.card.mat.uniforms.uTime.value = f.time
 
-    if (VIEW === 'pour') {
+    if (VIEW === 'pour' && this.bottle) {
       // the bottle held over the glass, tipped past level: the lip ~0.9" above the rim
       // (clear of it), the body rising away to the right; the stream lands in the rye
       const t = sstep(0.28, 0.34, l) * (1 - sstep(0.5, 0.56, l))

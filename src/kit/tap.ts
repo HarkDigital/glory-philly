@@ -20,6 +20,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
  * top), so a close shot reads the beer on the handle. Handles pivot at the
  * faucet like the real thing: pull brings the top toward the viewer (+z).
  *
+ * The plate atlas is sized for the plates' on-screen size (a plate is ~2.5 cm
+ * wide: ~40 CSS px in the tightest macro): `tileW` px per plate, 60 by default
+ * (pass ~80 on desktop for a retina macro). Its canvas is freed after each
+ * upload; drawLabels() restores it, so the fonts.ready redraw still works.
+ *
  * Frame (local units, ~1 = 1 ft): faucets at y = FAUCET_Y, their fronts at
  * z = FAUCET_Z, the stainless manifold behind them at z = MANIFOLD_Z on a
  * black steel backplate. The drip tray top is at y = TRAY_Y. Put the wall
@@ -49,6 +54,7 @@ export const TRAY_Y = 0.034
 export const HANDLE_H = 0.72
 const PIVOT_Y = FAUCET_Y + 0.085
 const PLATE_W = 0.08
+/** the plate art's design space (px); the atlas tiles are this scaled to `tileW` */
 const TILE_W = 120
 const TILE_H = 680
 const PLATE_H = (PLATE_W * TILE_H) / TILE_W
@@ -168,7 +174,7 @@ function handleGeometry(): THREE.BufferGeometry {
   return g
 }
 
-/** plate atlas: 12 × 3 tiles of 120 × 680 */
+/** plate atlas: 12 columns of tiles (tileW × tileW·680/120 px each) */
 const COLS = 12
 
 function splitLines(words: string[], k: number): string[] {
@@ -195,12 +201,14 @@ function splitLines(words: string[], k: number): string[] {
   return best
 }
 
-function drawPlate(g: CanvasRenderingContext2D, x0: number, y0: number, spec: TapSpec, style: number) {
+/** one plate into its tile at (x0, y0), `k` atlas px per design px */
+function drawPlate(g: CanvasRenderingContext2D, x0: number, y0: number, k: number, spec: TapSpec, style: number) {
   const [bg, ink, rule] = PLATES[style]
   const W = TILE_W
   const H = TILE_H
   g.save()
   g.translate(x0, y0)
+  g.scale(k, k)
   g.fillStyle = '#0c0806'
   g.fillRect(0, 0, W, H)
   g.fillStyle = bg
@@ -273,7 +281,7 @@ function drawPlate(g: CanvasRenderingContext2D, x0: number, y0: number, spec: Ta
   g.restore()
 }
 
-export function makeTapWall({ taps, x, bays }: { taps: TapSpec[]; x: number[]; bays?: TapBay[] }): TapWall {
+export function makeTapWall({ taps, x, bays, tileW = 60 }: { taps: TapSpec[]; x: number[]; bays?: TapBay[]; tileW?: number }): TapWall {
   const count = taps.length
   const group = new THREE.Group()
   group.name = 'tapWall'
@@ -385,11 +393,20 @@ export function makeTapWall({ taps, x, bays }: { taps: TapSpec[]; x: number[]; b
   // ---- label plates (instanced, each samples its own atlas tile)
   const atlas = document.createElement('canvas')
   const rows = Math.ceil(count / COLS)
-  atlas.width = TILE_W * COLS
-  atlas.height = TILE_H * rows
+  const tw = Math.max(16, Math.round(tileW))
+  const th = Math.round((tw * TILE_H) / TILE_W)
+  const aw = tw * COLS
+  const ah = th * rows
+  atlas.width = aw
+  atlas.height = ah
   const atlasTex = new THREE.CanvasTexture(atlas)
   atlasTex.colorSpace = THREE.SRGBColorSpace
   atlasTex.anisotropy = 8
+  // the GPU copy is all that's needed once uploaded: free the canvas (drawLabels restores it; the
+  // texture's storage keeps the full size, so a later redraw uploads into it again)
+  atlasTex.onUpdate = () => {
+    atlas.width = atlas.height = 1
+  }
   const plateGeo = new THREE.PlaneGeometry(PLATE_W, PLATE_H)
   const tile = new Float32Array(count * 2)
   for (let i = 0; i < count; i++) {
@@ -428,10 +445,14 @@ export function makeTapWall({ taps, x, bays }: { taps: TapSpec[]; x: number[]; b
   group.add(backplate, manifold, tray, trayTop, faucets, handles, plates)
 
   const drawLabels = () => {
+    if (atlas.width !== aw || atlas.height !== ah) {
+      atlas.width = aw
+      atlas.height = ah
+    }
     const g = atlas.getContext('2d')!
     g.fillStyle = '#0c0806'
-    g.fillRect(0, 0, atlas.width, atlas.height)
-    for (let i = 0; i < count; i++) drawPlate(g, (i % COLS) * TILE_W, Math.floor(i / COLS) * TILE_H, taps[i], styles[i])
+    g.fillRect(0, 0, aw, ah)
+    for (let i = 0; i < count; i++) drawPlate(g, (i % COLS) * tw, Math.floor(i / COLS) * th, tw / TILE_W, taps[i], styles[i])
     atlasTex.needsUpdate = true
   }
   drawLabels()

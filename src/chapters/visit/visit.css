@@ -15,10 +15,19 @@
 }
 
 .stage-visit .vs-card {
-  --vs-gap: clamp(12px, 2vh, 20px);
+  /* gaps, the headline and the phone number scale with the screen's HEIGHT
+     as well as its width, so a wide-but-short window still fits the card */
+  --vs-gap: clamp(12px, 1.6vh, 20px);
   position: relative;
   width: clamp(360px, 33vw, 470px);
   max-height: 100%;
+  /* the tiers below fit the card to every viewport; if something still can't
+     (a huge text zoom), it scrolls inside the panel instead of spilling onto
+     the scene and the chrome (index.ts hands it the wheel only then) */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(243, 234, 216, 0.3) transparent;
   padding: clamp(18px, 2.6vh, 28px) clamp(20px, 2vw, 30px) clamp(16px, 2.2vh, 24px);
   display: flex;
   flex-direction: column;
@@ -68,7 +77,7 @@
   margin-bottom: clamp(8px, 1.3vh, 14px);
 }
 .stage-visit .vs-title {
-  font-size: clamp(1.9rem, 2.75vw, 2.9rem);
+  font-size: clamp(1.9rem, min(2.75vw, 4.2vh), 2.9rem);
   line-height: 1;
 }
 .stage-visit .vs-stamp {
@@ -108,7 +117,7 @@
 }
 .stage-visit .vs-phone {
   font-family: var(--font-display);
-  font-size: clamp(1.7rem, 2.4vw, 2.5rem);
+  font-size: clamp(1.7rem, min(2.4vw, 3.7vh), 2.5rem);
   line-height: 1;
   color: var(--paper);
   text-decoration: none;
@@ -120,10 +129,9 @@
   color: var(--amber-hot);
 }
 .stage-visit .vs-addr {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 0.4em;
+  /* plain text flow: where the address has to wrap, the arrow stays with its
+     last word (.vs-nw) instead of dropping onto a line of its own */
+  display: block;
   align-self: flex-start;
   font-size: clamp(15px, 1.15vw, 17px);
   font-weight: 500;
@@ -136,6 +144,13 @@
 .stage-visit .vs-addr:hover,
 .stage-visit .vs-addr:focus-visible {
   text-decoration-color: var(--signal);
+}
+.stage-visit .vs-nw {
+  white-space: nowrap;
+}
+.stage-visit .vs-addr svg {
+  margin-left: 0.35em;
+  vertical-align: -0.02em;
 }
 .stage-visit .vs-addr svg,
 .stage-visit .hud-btn svg,
@@ -165,7 +180,9 @@
 /* ---- hours: two tables side by side ---- */
 .stage-visit .vs-hours {
   display: grid;
-  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  /* each table sized to its rows (the kitchen's "Mon Tues Wed" row is the
+     widest), the spare width shared out */
+  grid-template-columns: auto auto;
   column-gap: clamp(14px, 1.6vw, 24px);
 }
 .stage-visit .vs-hlabel {
@@ -182,8 +199,11 @@
 }
 .stage-visit .vs-hrow {
   display: flex;
+  /* a column too narrow for a row drops its time under the day (right-aligned)
+     rather than clipping it */
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 8px;
+  column-gap: 8px;
   padding: 3px 0;
   border-bottom: 1px solid var(--line);
   font-size: 13px;
@@ -194,7 +214,7 @@
   white-space: nowrap;
 }
 .stage-visit .vs-hrow dd {
-  margin: 0;
+  margin: 0 0 0 auto;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--paper);
@@ -203,8 +223,9 @@
 .stage-visit .vs-bar-full {
   display: none;
 }
-/* tall screens have room for every day of the week */
-@media (orientation: landscape) and (min-height: 1000px) {
+/* tall screens have room for every day of the week (a 1080p window with
+   the browser's toolbars, ~950 px, keeps the grouped rows) */
+@media (orientation: landscape) and (min-height: 1070px) {
   .stage-visit .vs-bar-full {
     display: block;
   }
@@ -336,34 +357,43 @@
     --vs-gap: clamp(10px, 1.7vh, 16px);
   }
 }
-@media (max-height: 940px) and (min-height: 801px) and (orientation: landscape) {
-  .stage-visit .vs-card {
-    --vs-gap: 13px;
-  }
+/* ≤ 940 px tall (a 1440x900 or 1920x1080 screen less the browser's
+   toolbars): no email line (Dave's address is in the large-party note) */
+@media (max-height: 940px) and (orientation: landscape) {
   .stage-visit .vs-mail {
     display: none;
   }
 }
-@media (max-height: 800px) and (orientation: landscape) {
-  .stage-visit .vs-card {
-    --vs-gap: 10px;
-  }
+/* ≤ 860 px tall: the headline on one line beside the stamp and a smaller
+   phone number (two big headline lines don't fit a wide-but-short window) */
+@media (max-height: 860px) and (orientation: landscape) {
+  /* sized to fit the card's measure at 1024–1920 (the headline is ~12.15 em
+     long), and free to wrap — never to run under the stamp — if a face
+     renders wider */
   .stage-visit .vs-title {
-    font-size: clamp(1.5rem, 2.25vw, 1.9rem);
-    white-space: nowrap;
+    font-size: clamp(1.3rem, 1.9vw, 1.75rem);
   }
   .stage-visit .vs-stamp {
     width: 44px;
     height: 44px;
   }
+  /* the stamp's box starts ~43 px in from the head's right edge: 52 px keeps
+     the headline ≥ 9 px clear of it */
   .stage-visit .vs-head {
-    padding-right: 50px;
+    padding-right: 52px;
   }
   .stage-visit .vs-phone {
     font-size: clamp(1.5rem, 2.1vw, 2rem);
   }
-  .stage-visit .vs-mail {
-    display: none;
+}
+@media (max-height: 940px) and (min-height: 801px) and (orientation: landscape) {
+  .stage-visit .vs-card {
+    --vs-gap: 13px;
+  }
+}
+@media (max-height: 800px) and (orientation: landscape) {
+  .stage-visit .vs-card {
+    --vs-gap: 10px;
   }
   .stage-visit .vs-hrow {
     padding: 2px 0;
@@ -523,12 +553,63 @@
   }
 }
 
-/* ---- short landscape (phones sideways, 200% zoom): a wide two-column card ---- */
-@media (orientation: landscape) and (max-height: 500px) {
+/* ---- short desktop windows (a 1366x768 laptop with the browser's chrome is
+   ~657 px tall, 125% zoom less): one column, tighter; the large-party note
+   gives way (the same note, with Dave's address, is in the Events inquiry
+   form and the accessible copy) ---- */
+@media (orientation: landscape) and (max-height: 740px) and (min-height: 501px) {
   .stage-visit .vs-card {
     --vs-gap: 8px;
-    width: min(70vw, 640px);
-    padding: 10px 14px;
+    padding-top: clamp(14px, 2.2vh, 18px);
+    padding-bottom: 12px;
+  }
+  .stage-visit .vs-cat {
+    padding-bottom: 5px;
+  }
+  .stage-visit .vs-eyebrow {
+    margin-bottom: 6px;
+  }
+  .stage-visit .vs-reach {
+    gap: 4px;
+  }
+  .stage-visit .vs-phone {
+    font-size: clamp(1.3rem, 1.9vw, 1.7rem);
+  }
+  .stage-visit .vs-hlabel {
+    margin-bottom: 4px;
+  }
+  .stage-visit .vs-hrow {
+    padding: 1px 0;
+  }
+  .stage-visit .vs-ctas {
+    gap: 8px;
+  }
+  .stage-visit .vs-reserve {
+    padding: 11px 18px;
+  }
+  .stage-visit .vs-more {
+    gap: 6px;
+  }
+  .stage-visit .vs-sub {
+    padding: 7px 12px;
+  }
+  .stage-visit .vs-note {
+    display: none;
+  }
+  .stage-visit .vs-foot {
+    padding-top: 7px;
+  }
+}
+
+/* ---- short landscape: a wide two-column card. Headline, phone + address and
+   the reservation buttons on the left; the hours, socials and footer on the
+   right. ≤ 640 px tall (small laptops zoomed, landscape tablets with toolbars),
+   and — at phone sizes — phones sideways and 200% zoom (below). ---- */
+@media (orientation: landscape) and (max-height: 640px) {
+  .stage-visit .vs-card {
+    --vs-gap: 8px;
+    width: min(66vw, 660px);
+    padding: 14px 18px 12px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     grid-template-areas:
@@ -537,27 +618,32 @@
       'reach hours'
       'ctas social'
       'ctas foot';
-    column-gap: 18px;
-    row-gap: 6px;
+    column-gap: 22px;
+    row-gap: 8px;
     align-content: start;
   }
   .stage-visit .vs-cat {
     grid-area: cat;
-    padding-bottom: 4px;
-    font-size: 9px;
+    margin-bottom: 0;
+    padding-bottom: 5px;
+    font-size: 9.5px;
   }
   .stage-visit .vs-head {
     grid-area: head;
-    padding-right: 40px;
+    padding-right: 46px;
   }
   .stage-visit .vs-reach {
     grid-area: reach;
+    padding-top: 8px;
+    gap: 3px;
   }
   .stage-visit .vs-ctas {
     grid-area: ctas;
+    gap: 6px;
   }
   .stage-visit .vs-hours {
     grid-area: hours;
+    column-gap: 12px;
   }
   .stage-visit .vs-social {
     grid-area: social;
@@ -567,16 +653,128 @@
   .stage-visit .vs-foot {
     grid-area: foot;
     align-self: end;
+    padding-top: 6px;
+    gap: 10px;
+  }
+  .stage-visit .vs-eyebrow {
+    margin-bottom: 5px;
+  }
+  /* two lines by design here (the column is too narrow for one at a
+     headline size): balanced, beside the stamp */
+  .stage-visit .vs-title {
+    font-size: 1.45rem;
+  }
+  /* stamp box ~37 px in from the head's edge: 46 px keeps ~9 px clear */
+  .stage-visit .vs-stamp {
+    width: 38px;
+    height: 38px;
+  }
+  .stage-visit .vs-phone {
+    font-size: 1.35rem;
+  }
+  .stage-visit .vs-addr {
+    font-size: 13px;
+  }
+  .stage-visit .vs-reserve {
+    padding: 10px 14px;
+    font-size: 11px;
+  }
+  .stage-visit .vs-more {
+    gap: 6px;
+  }
+  .stage-visit .vs-sub {
+    padding: 6px 10px;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+  }
+  .stage-visit .vs-sub svg {
+    display: none;
+  }
+  .stage-visit .vs-note {
+    display: block;
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .stage-visit .vs-hlabel {
+    font-size: 10px;
+    margin-bottom: 3px;
+  }
+  .stage-visit .vs-hrow {
+    padding: 1px 0;
+    font-size: 12px;
+  }
+  .stage-visit .vs-hrow dd {
+    font-size: 11px;
+  }
+  .stage-visit .vs-soc {
+    font-size: 12px;
+  }
+  .stage-visit .vs-soc-name {
+    font-size: 9.5px;
+  }
+  .stage-visit .vs-legal {
+    font-size: 10.5px;
+  }
+  .stage-visit .vs-top {
+    padding: 7px 11px;
+    font-size: 9.5px;
+  }
+}
+
+/* the two-column card on a narrower screen: the hours and the secondary
+   buttons take the phone-sideways sizes so every row fits its column */
+@media (orientation: landscape) and (max-height: 640px) and (max-width: 1000px) {
+  .stage-visit .vs-card {
+    width: min(72vw, 660px);
+    column-gap: 18px;
+  }
+  .stage-visit .vs-hours {
+    column-gap: 10px;
+  }
+  .stage-visit .vs-hlabel {
+    font-size: 9.5px;
+  }
+  .stage-visit .vs-hrow {
+    font-size: 11px;
+  }
+  .stage-visit .vs-hrow dd {
+    font-size: 10px;
+  }
+  .stage-visit .vs-sub {
+    padding: 6px 8px;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+  }
+}
+
+/* ---- short landscape at phone sizes (phones sideways, 200% zoom): the same
+   card, smaller type ---- */
+@media (orientation: landscape) and (max-height: 500px) {
+  .stage-visit .vs-card {
+    width: min(70vw, 640px);
+    padding: 10px 14px;
+    column-gap: 18px;
+    row-gap: 6px;
+  }
+  .stage-visit .vs-cat {
+    padding-bottom: 4px;
+    font-size: 9px;
+  }
+  /* one line beside the stamp where the column allows (phones sideways),
+     two where it doesn't (200% zoom); the stamp box sits ~28 px in */
+  .stage-visit .vs-head {
+    padding-right: 38px;
   }
   .stage-visit .vs-eyebrow {
     margin-bottom: 4px;
   }
   .stage-visit .vs-title {
-    font-size: 1.25rem;
+    font-size: 1.15rem;
   }
   .stage-visit .vs-stamp {
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
   }
   .stage-visit .vs-reach {
     padding-top: 6px;
@@ -605,9 +803,6 @@
     padding: 5px 9px;
     font-size: 9px;
     letter-spacing: 0.06em;
-  }
-  .stage-visit .vs-sub svg {
-    display: none;
   }
   .stage-visit .vs-note {
     font-size: 10.5px;
@@ -643,5 +838,26 @@
   .stage-visit .vs-top {
     padding: 5px 9px;
     font-size: 9px;
+  }
+}
+
+/* the narrowest landscape screens (small phones sideways, narrow windows): a
+   wider card, so each column holds a full hours row and two button labels */
+@media (orientation: landscape) and (max-height: 640px) and (max-width: 780px) {
+  .stage-visit .vs-card {
+    width: min(80vw, 640px);
+  }
+  .stage-visit .vs-hrow {
+    column-gap: 6px;
+  }
+}
+/* …and the shortest of them (667x375, 740x360): the large-party note gives
+   way, as on short desktop windows */
+@media (orientation: landscape) and (max-height: 400px) and (max-width: 780px) {
+  .stage-visit .vs-card {
+    width: min(82vw, 640px);
+  }
+  .stage-visit .vs-note {
+    display: none;
   }
 }

@@ -18,7 +18,7 @@ import { BAYS, K, LOCAL_SHELF, LP_KX, SHELF_Y, WALL_Z, ky, type NamedRow } from 
  * and a foil capsule (+ wire cage on the corked 750s). Four formats: the 750
  * corked-and-caged, the 330 stubby, the magnum and the 3 litre.
  *
- *   American       the brick bay under the painted "Old 1837": 5 / 5 / 4
+ *   American       the sooty brick bay: 5 / 5 / 4
  *   International  the wide walnut bay: 3 shelves of 14, in list order
  *   Local          the two bottles on the Local shelf, beside the "Bottles" LP
  *
@@ -148,15 +148,17 @@ const PAPERS: [string, string, string][] = [
 interface LabelSpec {
   name: string | null
   design: number
+  /** a double-size atlas cell: the Local pair, the one macro on the shelves */
+  big: boolean
 }
 
-function wrapLines(g: CanvasRenderingContext2D, text: string, width: number) {
+function wrapLines(text: string, width: number, measure: (t: string) => number) {
   const words = text.replace(/\s+-\s+/g, ' ').split(/\s+/)
   const lines: string[] = []
   let cur = ''
   for (const w of words) {
     const t = cur ? `${cur} ${w}` : w
-    if (g.measureText(t).width <= width || !cur) cur = t
+    if (measure(t) <= width || !cur) cur = t
     else {
       lines.push(cur)
       cur = w
@@ -164,6 +166,30 @@ function wrapLines(g: CanvasRenderingContext2D, text: string, width: number) {
   }
   if (cur) lines.push(cur)
   return lines
+}
+
+/*
+ * Tracked caps, laid out glyph by glyph: canvas `letterSpacing` doesn't exist
+ * in Safari 15–17 (the build target), where tracked names came out tight. The
+ * tracking is added here, the same in every browser; each glyph's x is the
+ * kerned width of the text up to and including it, minus its own advance, so
+ * kerning pairs survive.
+ */
+const trackedWidth = (g: CanvasRenderingContext2D, t: string, track: number) =>
+  g.measureText(t).width + track * Math.max(0, [...t].length - 1)
+
+function fillTracked(g: CanvasRenderingContext2D, t: string, cx: number, y: number, track: number) {
+  const align = g.textAlign
+  g.textAlign = 'left'
+  const x0 = cx - trackedWidth(g, t, track) / 2
+  let pre = ''
+  let i = 0
+  for (const ch of t) {
+    pre += ch
+    g.fillText(ch, x0 + g.measureText(pre).width - g.measureText(ch).width + i * track, y)
+    i++
+  }
+  g.textAlign = align
 }
 
 /** the label's name face: the slab on the light papers, tracked Inter Tight caps on the dark ones (and on long names) */
@@ -213,20 +239,21 @@ function drawLabel(g: CanvasRenderingContext2D, x: number, y: number, s: number,
     g.textBaseline = 'middle'
     const style = nameStyle(spec)
     const text = style === 'caps' ? spec.name.toUpperCase() : spec.name
-    const gg = g as CanvasRenderingContext2D & { letterSpacing?: string }
     let size = style === 'slab' ? 34 : 26
     const lead = style === 'slab' ? 1.08 : 1.22
     let lines: string[] = []
+    // caps are tracked 0.1 em (drawn glyph by glyph), the slab is set solid
+    let track = 0
+    const measure = (t: string) => (track ? trackedWidth(g, t, track) : g.measureText(t).width)
     for (; size >= 13; size -= 1) {
       g.font = style === 'slab' ? `400 ${size * k}px ${FONT.display}` : `700 ${size * k}px ${FONT.sans}`
-      if (style === 'caps') gg.letterSpacing = `${(size * k * 0.1).toFixed(2)}px`
-      lines = wrapLines(g, text, 170 * k)
-      if (lines.length * size * lead <= 146 && lines.every(l => g.measureText(l).width <= 184 * k)) break
+      track = style === 'caps' ? size * k * 0.1 : 0
+      lines = wrapLines(text, 170 * k, measure)
+      if (lines.length * size * lead <= 146 && lines.every(l => measure(l) <= 184 * k)) break
     }
     const lh = size * lead * k
     const top = c / 2 - ((lines.length - 1) * lh) / 2
-    lines.forEach((l, i) => g.fillText(l, c / 2, top + i * lh))
-    if (style === 'caps') gg.letterSpacing = '0px'
+    lines.forEach((l, i) => (track ? fillTracked(g, l, c / 2, top + i * lh, track) : g.fillText(l, c / 2, top + i * lh)))
   } else {
     // blank: a seal
     g.strokeStyle = rule
@@ -244,6 +271,7 @@ function drawLabel(g: CanvasRenderingContext2D, x: number, y: number, s: number,
 /* ---------------- the plan: where every named bottle stands ---------------- */
 
 interface Slot {
+  section: NamedRow['section']
   kind: Kind
   x: number
   y: number
@@ -284,8 +312,9 @@ export function planBottles(): BottlePlan {
       const bx = x + widths[i] / 2
       x += widths[i]
       const cell = specs.length
-      specs.push({ name: n, design: (designSeed + i * 5 + Math.floor(rnd() * 3)) % PAPERS.length })
+      specs.push({ name: n, design: (designSeed + i * 5 + Math.floor(rnd() * 3)) % PAPERS.length, big: section === 'local' })
       slots.push({
+        section,
         kind: k,
         x: bx,
         y,
@@ -298,7 +327,7 @@ export function planBottles(): BottlePlan {
     })
   }
   const byId = (id: BeerGroup['id']) => BOTTLES.find(g => g.id === id)!.beers
-  // AMERICAN: 5 / 5 / 4 under the paint
+  // AMERICAN: 5 / 5 / 4 in the brick bay
   {
     const b = byId('american')
     const rs = [b.slice(0, 5), b.slice(5, 10), b.slice(10)]
@@ -322,13 +351,69 @@ export function planBottles(): BottlePlan {
 
 export interface BottleWall {
   group: THREE.Group
+  /**
+   * Cull the bottles bottle by bottle against the camera about to render
+   * (call from post.preRender; see the families below).
+   */
+  cull(camera: THREE.Camera): void
   /** 0..1 light through the glass (the bulbs behind/beside) */
   setBacklight(v: number): void
   /** world-space centre of a bottle of group gi, index bi */
   bottlePos(group: BeerGroup['id'], i: number, out: THREE.Vector3): THREE.Vector3
-  /** redraw the label text once fonts arrive */
-  redraw(): void
+  /** redraw the label text once fonts arrive (uploads now when given the renderer) */
+  redraw(renderer?: THREE.WebGLRenderer): void
 }
+
+/** the label faces the atlas draws with have landed (then the canvas can go) */
+const labelFacesReady = () => {
+  const f = document.fonts
+  if (!f?.check) return true
+  try {
+    return f.check(`400 40px ${FONT.display}`, 'Glory ĀŁŠ') && f.check(`700 40px ${FONT.sans}`, 'Glory ĀŁŠ')
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Pack the labels into a G×G grid of cells: the big ones (the Local pair, shot
+ * in macro) as 2×2 blocks along the bottom rows, the rest row-major around them.
+ */
+function packAtlas(specs: LabelSpec[]) {
+  for (let G = GRID; ; G++) {
+    const used = new Uint8Array(G * G)
+    const at: { col: number; row: number; size: number }[] = []
+    let ok = true
+    let bc = 0
+    specs.forEach((s, i) => {
+      if (!s.big || !ok) return
+      const col = bc
+      const row = G - 2
+      bc += 2
+      if (col + 2 > G) {
+        ok = false
+        return
+      }
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) used[(row + dy) * G + col + dx] = 1
+      at[i] = { col, row, size: 2 }
+    })
+    let c = 0
+    specs.forEach((s, i) => {
+      if (s.big || !ok) return
+      while (c < G * G && used[c]) c++
+      if (c >= G * G) {
+        ok = false
+        return
+      }
+      used[c] = 1
+      at[i] = { col: c % G, row: Math.floor(c / G), size: 1 }
+    })
+    if (ok) return { G, at }
+  }
+}
+
+const _frustum = new THREE.Frustum()
+const _pv = new THREE.Matrix4()
 
 /** the named bottles; `pools` (the room kit's) light them like the kit's own */
 export async function makeBottleWall(plan: BottlePlan, mobile: boolean, pools?: { set: PoolSet; root: THREE.Object3D }): Promise<BottleWall> {
@@ -336,19 +421,30 @@ export async function makeBottleWall(plan: BottlePlan, mobile: boolean, pools?: 
   const { slots, specs, posIndex } = plan
 
   // ---- atlas ----
-  const A = mobile ? 1024 : 2048
-  const cell = A / GRID
+  // 192 px cells (128 on phones) read the shelf shots; the Local pair gets
+  // 2×2 cells for its macro. The canvas is freed once the final (house-face)
+  // labels are on the GPU.
+  const A = mobile ? 1024 : 1536
+  const { G, at } = packAtlas(specs)
+  const cell = A / G
   const canvas = document.createElement('canvas')
   canvas.width = canvas.height = A
   const ctx2 = canvas.getContext('2d')!
   const draw = () => {
     ctx2.clearRect(0, 0, A, A)
-    specs.forEach((s, i) => drawLabel(ctx2, (i % GRID) * cell, Math.floor(i / GRID) * cell, cell, s))
+    specs.forEach((s, i) => drawLabel(ctx2, at[i].col * cell, at[i].row * cell, at[i].size * cell, s))
   }
   draw()
   const atlas = new THREE.CanvasTexture(canvas)
   atlas.colorSpace = THREE.SRGBColorSpace
   atlas.anisotropy = 8
+  let final = false
+  let freed = false
+  atlas.onUpdate = () => {
+    if (!final) return
+    canvas.width = canvas.height = 1
+    freed = true
+  }
 
   await nextFrame()
 
@@ -390,30 +486,47 @@ export async function makeBottleWall(plan: BottlePlan, mobile: boolean, pools?: 
   const labelMat = new THREE.MeshStandardMaterial({ map: atlas, roughness: 0.62, metalness: 0, envMapIntensity: 0.5 })
   labelMat.onBeforeCompile = sh => {
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec2 aCell;')
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n#ifdef USE_MAP\nvMapUv = vMapUv * ${(1 / GRID).toFixed(4)} * 0.96 + ${(0.02 / GRID).toFixed(5)} + aCell;\n#endif`)
+      .replace('#include <common>', '#include <common>\nattribute vec4 aCell;')
+      // the label's cell in the atlas (xy corner, zw size), inset 2% against mip bleed
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\nvMapUv = aCell.xy + aCell.zw * (0.02 + 0.96 * vMapUv);\n#endif')
   }
   labelMat.customProgramCacheKey = () => 'cellar-label'
   pooled(labelMat, 'cellar-label')
   const foilMat = pooled(new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.85, roughness: 0.4, envMapIntensity: 0.85 }), 'cellar-foil')
   const cageMat = pooled(new THREE.MeshStandardMaterial({ color: '#d8d4cc', metalness: 1, roughness: 0.3 }), 'cellar-cage')
 
-  // ---- instanced meshes: one family per profile ----
-  const corkLike = slots.filter(s => s.kind !== 'stubby')
-  const stubs = slots.filter(s => s.kind === 'stubby')
+  // ---- instanced meshes: one family per profile per section ----
+  // Culled by hand (cull() below) against the camera about to render: each
+  // family's instances are sorted right → left (the story moves right after
+  // the bottle beats), and the family draws only the prefix up to its last
+  // bottle inside the frustum — none of the wall that a shot can't see, in
+  // either the frame or three's transmission pass. (A shelf's bounding sphere
+  // grazes shots that never see it, e.g. the wine tower's.)
+  const families: { meshes: THREE.InstancedMesh[]; boxes: THREE.Box3[] }[] = []
   const m4 = new THREE.Matrix4()
   const q = new THREE.Quaternion()
   const e = new THREE.Euler()
   const sc = new THREE.Vector3()
   const p = new THREE.Vector3()
-  const build = (list: Slot[], body: THREE.BufferGeometry, label: THREE.BufferGeometry, cap: THREE.BufferGeometry, cage: THREE.BufferGeometry | null) => {
-    const n = list.length
+  const build = (into: THREE.Group, unsorted: Slot[], body: THREE.BufferGeometry, labelBase: THREE.BufferGeometry, cap: THREE.BufferGeometry, cage: THREE.BufferGeometry | null) => {
+    const n = unsorted.length
     if (!n) return
+    const list = [...unsorted].sort((a, b) => b.x - a.x)
+    // the label carries a per-family instanced attribute: its own geometry
+    const label = labelBase.clone()
     const bodies = new THREE.InstancedMesh(body, glassMat, n)
     const labels = new THREE.InstancedMesh(label, labelMat, n)
     const caps = new THREE.InstancedMesh(cap, foilMat, n)
     const cages = cage ? new THREE.InstancedMesh(cage, cageMat, n) : null
-    const cells = new Float32Array(n * 2)
+    const meshes = [bodies, labels, caps, ...(cages ? [cages] : [])]
+    // one bottle's bounds (glass, label, capsule, cage), placed per instance
+    const unit = new THREE.Box3()
+    for (const m of meshes) {
+      m.geometry.computeBoundingBox()
+      unit.union(m.geometry.boundingBox!)
+    }
+    const boxes: THREE.Box3[] = []
+    const cells = new Float32Array(n * 4)
     list.forEach((s, i) => {
       const k = KIND_SCALE[s.kind]
       // a hair off the shelf: no z-fight with the walnut
@@ -421,30 +534,58 @@ export async function makeBottleWall(plan: BottlePlan, mobile: boolean, pools?: 
       q.setFromEuler(e.set(0, s.rotY, 0))
       sc.setScalar(k)
       m4.compose(p, q, sc)
-      bodies.setMatrixAt(i, m4)
-      labels.setMatrixAt(i, m4)
-      caps.setMatrixAt(i, m4)
-      cages?.setMatrixAt(i, m4)
+      for (const m of meshes) m.setMatrixAt(i, m4)
+      boxes.push(unit.clone().applyMatrix4(m4))
       bodies.setColorAt(i, s.tint)
       caps.setColorAt(i, s.foil)
-      cells[i * 2] = (s.cell % GRID) / GRID
-      cells[i * 2 + 1] = 1 - (Math.floor(s.cell / GRID) + 1) / GRID
+      const c = at[s.cell]
+      cells[i * 4] = c.col / G
+      cells[i * 4 + 1] = 1 - (c.row + c.size) / G
+      cells[i * 4 + 2] = c.size / G
+      cells[i * 4 + 3] = c.size / G
     })
-    label.setAttribute('aCell', new THREE.InstancedBufferAttribute(cells, 2))
-    for (const m of [bodies, labels, caps, cages]) {
-      if (!m) continue
-      m.frustumCulled = false
+    label.setAttribute('aCell', new THREE.InstancedBufferAttribute(cells, 4))
+    for (const m of meshes) {
+      m.computeBoundingSphere()
       m.castShadow = false
       m.receiveShadow = false
       if (pools) poolHook(m, pools.set, pools.root)
-      group.add(m)
+      into.add(m)
     }
+    families.push({ meshes, boxes })
   }
-  build(corkLike, bodyGeo(CORK_BODY, mobile), labelGeo(0.259, 0.28, 0.9), corkCapsuleGeo(), cageGeo())
-  build(stubs, bodyGeo(STUBBY_BODY, mobile), labelGeo(0.216, 0.2, 0.66), crownGeo(), null)
+  const cork = { body: bodyGeo(CORK_BODY, mobile), label: labelGeo(0.259, 0.28, 0.9), cap: corkCapsuleGeo(), cage: cageGeo() }
+  const stub = { body: bodyGeo(STUBBY_BODY, mobile), label: labelGeo(0.216, 0.2, 0.66), cap: crownGeo() }
+  for (const section of ['american', 'international', 'local'] as const) {
+    const into = new THREE.Group()
+    into.name = `cellar-bottles-${section}`
+    group.add(into)
+    const mine = slots.filter(s => s.section === section)
+    build(into, mine.filter(s => s.kind !== 'stubby'), cork.body, cork.label, cork.cap, cork.cage)
+    build(into, mine.filter(s => s.kind === 'stubby'), stub.body, stub.label, stub.cap, null)
+  }
+  cork.label.dispose()
+  stub.label.dispose()
 
   return {
     group,
+    cull(camera) {
+      for (const f of families) {
+        // the frustum in the family's own space: test the stored boxes as they are
+        _pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(f.meshes[0].matrixWorld)
+        _frustum.setFromProjectionMatrix(_pv)
+        let count = 0
+        for (let i = f.boxes.length - 1; i >= 0; i--)
+          if (_frustum.intersectsBox(f.boxes[i])) {
+            count = i + 1
+            break
+          }
+        for (const m of f.meshes) {
+          m.count = count
+          m.visible = count > 0
+        }
+      }
+    },
     setBacklight(v) {
       backlight.value = v
     },
@@ -452,9 +593,17 @@ export async function makeBottleWall(plan: BottlePlan, mobile: boolean, pools?: 
       const v = posIndex.get(`${gid}:${i}`)
       return v ? out.copy(v) : out.set(0, 3, WALL_Z)
     },
-    redraw() {
+    redraw(renderer) {
+      if (freed) {
+        canvas.width = canvas.height = A
+        freed = false
+      }
       draw()
+      // the house faces are in: free the canvas once this upload lands
+      final = labelFacesReady()
       atlas.needsUpdate = true
+      // upload now (off the first Cellar frame)
+      renderer?.initTexture(atlas)
     },
   }
 }

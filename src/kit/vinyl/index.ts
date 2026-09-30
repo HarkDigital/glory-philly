@@ -41,6 +41,8 @@ import {
   FONT,
   artCanvas,
   catNo,
+  fillText,
+  setTracking,
   drawCompanySleeve,
   drawCover,
   drawLabel,
@@ -164,10 +166,14 @@ import {
  *  coverAtlas(covers, back?)               2048² 4×4 atlas for CrateRig fillers
  *  catNo(n) → 'GLY-00n' · loadCover(url, { size, square, focus }) · draw*() to paint your own canvases
  *  FONT.display (titles) · FONT.sans (= FONT.mono: everything else) · subFont(px, w?) · capsFont(px, w?)
- *  fillText(ctx, text, x, y) / measure(ctx, text): set "33⅓" from Inter Tight's own figures
+ *  fillText(ctx, text, x, y) / measure(ctx, text): set "33⅓" from Inter Tight's own figures,
+ *        and honour setTracking(ctx, px) in EVERY browser (canvas letterSpacing is missing
+ *        in Safari / Firefox < 115; never set ctx.letterSpacing directly for tracked caps)
  *  loadVinylFonts() waits for exactly these faces (Alfa Slab One 400, Inter Tight 400–700)
  *  Art textures FREEZE once settled (fonts + photo): the canvas is freed after
  *  the upload. To change art, make a new texture (and dispose the old one).
+ *  The deck's printed legend is ONE shared texture for every turntable, and
+ *  crate legends are shared per text (512 wide on phones); never dispose them.
  *
  * ─── light ─────────────────────────────────────────────────────────────────
  *
@@ -240,7 +246,7 @@ export {
 }
 export { drawRoundel, ringText, drawCoverImage, INKS, RIM_TEXT } from './art'
 export { loadVinylFonts }
-export { fillText, measure, subFont, capsFont } from './art'
+export { fillText, measure, setTracking, getTracking, subFont, capsFont } from './art'
 export { leanAgainst, standOnLedge, makeLedge, planeClearance, localBounds } from './place'
 export type { LeanOpts, LeanPose, LedgeSpec, Ledge, Placeable } from './place'
 export type { CoverSpec, LabelSpec, TracklistSpec, CompanySleeveSpec, CoverSource, RecordDims, CrateDims, CrateShade }
@@ -318,12 +324,24 @@ function artTexture(
   settled?: Promise<unknown>,
   afterFinal?: () => void,
 ): ArtTexture {
-  const { canvas, ctx, texture } = artCanvas(res, res)
+  return frozenArt(res, res, undefined, draw, settled, afterFinal)
+}
+
+/** artTexture() for any w × h (and a `fill`, e.g. transparent for printed legends) */
+function frozenArt(
+  w: number,
+  h: number,
+  fill: string | undefined,
+  draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void,
+  settled?: Promise<unknown>,
+  afterFinal?: () => void,
+): ArtTexture {
+  const { canvas, ctx, texture } = artCanvas(w, h, fill)
   const t = texture as ArtTexture
   let freed = false
   const redraw = () => {
     if (freed) return
-    draw(ctx, res)
+    draw(ctx, w, h)
     t.needsUpdate = true
   }
   t.userData.redraw = redraw
@@ -412,6 +430,86 @@ export function tracklistTexture(spec: TracklistSpec, res = 1024): ArtTexture {
 /** A 7" company sleeve (or `inner: true`, the 12" paper inner sleeve), 512². */
 export function companyTexture(spec: CompanySleeveSpec = {}, res = 512): ArtTexture {
   return artTexture(res, (ctx, s) => drawCompanySleeve(ctx, 0, 0, s, spec))
+}
+
+// ─── printed legends (shared, frozen like the art) ──────────────────────────
+
+/**
+ * Legend canvas width: 1024, or 512 on phones (the Engine's own test). On a
+ * phone no deck spans more than ~512 device px (Last Call's close-up; the
+ * others 200–480) and no crate plate more than ~220, so 512 is still ≥ 1
+ * texel per pixel there.
+ */
+const LEGEND_W = typeof window !== 'undefined' && (matchMedia('(pointer: coarse)').matches || window.innerWidth < 768) ? 512 : 1024
+
+let deckLegend: ArtTexture | null = null
+/**
+ * The deck plate's printed legends (START · STOP, 33 / 45, PITCH, GLORY,
+ * DIRECT DRIVE · QUARTZ LOCK): the same print on every deck, so ONE texture
+ * for the whole site (it was 4.2 MB of GPU and 3.3 MB of canvas per deck).
+ * Never dispose it: its canvas is freed after the final upload.
+ */
+function deckLegendTexture(): ArtTexture {
+  if (deckLegend) return deckLegend
+  const { w, d } = TT
+  const cw = LEGEND_W
+  const ch = Math.round((cw * d) / w)
+  const px = (x: number) => ((x + w / 2) / w) * cw
+  const pz = (z: number) => ((z + d / 2) / d) * ch
+  deckLegend = frozenArt(cw, ch, 'rgba(0,0,0,0)', ctx => {
+    ctx.clearRect(0, 0, cw, ch)
+    ctx.fillStyle = 'rgba(214,210,202,0.8)'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = `500 ${cw * 0.0115}px ${FONT.mono}`
+    ctx.fillText('START · STOP', px(-0.6), pz(0.535))
+    ctx.fillText('33', px(-0.43), pz(0.54))
+    ctx.fillText('45', px(-0.34), pz(0.54))
+    ctx.fillText('PITCH', px(0.62), pz(0.02))
+    ctx.fillText('+', px(0.66), pz(0.08))
+    ctx.fillText('−', px(0.66), pz(0.44))
+    ctx.textAlign = 'left'
+    ctx.font = `400 ${cw * 0.02}px ${FONT.display}`
+    ctx.fillStyle = 'rgba(236,230,218,0.86)'
+    ctx.fillText('GLORY', px(0.2), pz(0.5))
+    ctx.font = `500 ${cw * 0.0095}px ${FONT.mono}`
+    ctx.fillStyle = 'rgba(214,210,202,0.6)'
+    ctx.fillText('DIRECT DRIVE · QUARTZ LOCK', px(0.2), pz(0.535))
+  })
+  deckLegend.name = 'vinyl-deck-legend'
+  return deckLegend
+}
+
+const crateLegends = new Map<string, ArtTexture>()
+/**
+ * A crate's front plate: tracked caps, left and right (shared between crates
+ * with the same legend; frozen, its canvas freed after the final upload).
+ * The tracking goes through setTracking/fillText, so Safari tracks it too.
+ */
+function crateLegendTexture(left: string, right?: string): ArtTexture {
+  const key = `${left}\n${right ?? ''}`
+  const hit = crateLegends.get(key)
+  if (hit) return hit
+  const cw = LEGEND_W
+  const k = cw / 1024
+  const t = frozenArt(cw, Math.round(96 * k), 'rgba(0,0,0,0)', (ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h)
+    ctx.fillStyle = 'rgba(214,211,204,0.9)'
+    ctx.textBaseline = 'middle'
+    ctx.font = `600 ${22 * k}px ${FONT.mono}`
+    setTracking(ctx, 6 * k)
+    ctx.textAlign = 'left'
+    fillText(ctx, left, 40 * k, h / 2)
+    if (right) {
+      ctx.textAlign = 'right'
+      fillText(ctx, right, w - 40 * k, h / 2)
+    }
+    setTracking(ctx, 0)
+    ctx.textAlign = 'left'
+  })
+  t.name = 'vinyl-crate-legend'
+  crateLegends.set(key, t)
+  return t
 }
 
 export interface AtlasCover extends CoverSpec {
@@ -654,27 +752,9 @@ export function makeCrate(opts: CrateOpts = {}): Crate {
     group.add(contactShadow(outer, (dims.zFront - dims.zBack) / 2 + dims.wall, 0.03))
   }
   if (opts.legend) {
-    const [left, right] = opts.legend
-    const { ctx, texture } = artCanvas(1024, 96, 'rgba(0,0,0,0)')
-    const draw = () => {
-      ctx.clearRect(0, 0, 1024, 96)
-      ctx.fillStyle = 'rgba(214,211,204,0.9)'
-      ctx.textBaseline = 'middle'
-      ;(ctx as CanvasRenderingContext2D & { letterSpacing?: string }).letterSpacing = '6px'
-      ctx.font = `600 22px ${FONT.mono}`
-      ctx.textAlign = 'left'
-      ctx.fillText(left, 40, 48)
-      if (right) {
-        ctx.textAlign = 'right'
-        ctx.fillText(right, 984, 48)
-      }
-      texture.needsUpdate = true
-    }
-    draw()
-    onFonts(draw)
     const plate = new THREE.Mesh(
       new THREE.PlaneGeometry(0.9, 0.0844),
-      new THREE.MeshStandardMaterial({ map: texture, transparent: true, depthWrite: false, roughness: 0.4, metalness: 0.3 }),
+      new THREE.MeshStandardMaterial({ map: crateLegendTexture(opts.legend[0], opts.legend[1]), transparent: true, depthWrite: false, roughness: 0.4, metalness: 0.3 }),
     )
     plate.position.set(0, Math.min(0.172, dims.frontH * 0.62), dims.zFront + 0.0009)
     group.add(plate)
@@ -1537,44 +1617,18 @@ export function makeTurntable(opts: TurntableOpts = {}): Turntable {
     const deck = mesh(roundedBox(w - 0.03, 0.012, d - 0.03, 0.005, 2), M.deck)
     deck.position.y = top - 0.006
   }
-  // printed deck legends
+  // printed deck legends: one shared texture for every deck (deckLegendTexture)
+  const legendMat = new THREE.MeshStandardMaterial({
+    map: deckLegendTexture(),
+    transparent: true,
+    roughness: 0.6,
+    metalness: 0,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+  })
   {
-    const cw = 1024
-    const ch = Math.round((cw * d) / w)
-    const { canvas, ctx, texture } = artCanvas(cw, ch, 'rgba(0,0,0,0)')
-    ctx.clearRect(0, 0, cw, ch)
-    const px = (x: number) => ((x + w / 2) / w) * cw
-    const pz = (z: number) => ((z + d / 2) / d) * ch
-    const draw = () => {
-      ctx.clearRect(0, 0, cw, ch)
-      ctx.fillStyle = 'rgba(214,210,202,0.8)'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.font = `500 ${cw * 0.0115}px ${FONT.mono}`
-      ctx.fillText('START · STOP', px(-0.6), pz(0.535))
-      ctx.fillText('33', px(-0.43), pz(0.54))
-      ctx.fillText('45', px(-0.34), pz(0.54))
-      ctx.fillText('PITCH', px(0.62), pz(0.02))
-      ctx.fillText('+', px(0.66), pz(0.08))
-      ctx.fillText('−', px(0.66), pz(0.44))
-      ctx.textAlign = 'left'
-      ctx.font = `400 ${cw * 0.02}px ${FONT.display}`
-      ctx.fillStyle = 'rgba(236,230,218,0.86)'
-      ctx.fillText('GLORY', px(0.2), pz(0.5))
-      ctx.font = `500 ${cw * 0.0095}px ${FONT.mono}`
-      ctx.fillStyle = 'rgba(214,210,202,0.6)'
-      ctx.fillText('DIRECT DRIVE · QUARTZ LOCK', px(0.2), pz(0.535))
-      texture.needsUpdate = true
-    }
-    draw()
-    onFonts(draw)
-    void canvas
-    const legend = mesh(
-      new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2),
-      new THREE.MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.6, metalness: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
-      group,
-      false,
-    )
+    const legend = mesh(new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2), legendMat, group, false)
     legend.position.y = top + 0.0004
   }
 
@@ -1873,6 +1927,8 @@ export function makeTurntable(opts: TurntableOpts = {}): Turntable {
     dispose() {
       for (const g of geos) g.dispose()
       for (const m of Object.values(M)) (m as THREE.Material).dispose()
+      // the legend's texture is shared by every deck: only its material is ours
+      legendMat.dispose()
     },
   }
   tt.setPower(1)

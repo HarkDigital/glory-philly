@@ -12,11 +12,12 @@ import { addBrickPanel, addDuct, addPendant, addPlankColumn, addPlankWall, addRe
  *   - the exposed brick bay with the painted wall sign (ref5 — this wall is
  *     real): old Philadelphia brick from the kit, the sign drawn in Alfa Slab
  *     One on a canvas over it, whitewash sinking into the mortar courses,
- *   - reclaimed-walnut cladding: a boxy clad column either side of the brick
- *     (the right one stands against the window) with a wire-cage Edison
- *     sconce on each, walnut planks right of the window and under the sill,
+ *   - reclaimed walnut where the bar's own cladding is: a boxy clad column
+ *     left of the brick and the plank wall beyond it; the window bay is
+ *     black-painted like ref5's (the pier between the brick and the window,
+ *     the wall right of it, the panel under the sill, the header over it),
+ *     a wire-cage Edison sconce on the column and on the pier,
  *   - the black ceiling with its joists, silver flex duct and a cage pendant,
- *     a black-painted header over the window,
  *   - a low ebonised record console under the sign, its open front packed
  *     with LPs (the walnut deck sits on it),
  *   - Glory's tall black-framed window (two sashes of small panes and a
@@ -43,7 +44,7 @@ export const STREET_Z = -9
 export const FLOOR = -2.2
 /** the black ceiling (on a course line) */
 export const CEIL = COURSE * 54
-/** the clad columns either side of the brick bay (x spans); the right one stands against the window */
+/** the walnut column left of the brick bay and the black-painted pier right of it, against the window (x spans) */
 export const COL_A = { x0: -5.6, x1: -4.65 }
 export const COL_B = { x0: 0.05, x1: WIN.x0 }
 /** columns: 0.36 m deep off 2 cm of cladding */
@@ -97,17 +98,27 @@ export function makeRoom({ mobile = false } = {}): VisitRoom {
   const kit = assemble({ scale: ROOM_S, seed: 17, mobile, ambient: 0.3 }, c => {
     const A = c.anchors
     const bulbs: THREE.Vector3[] = []
-    // ── walnut: the wall left of column A, right of the window, under the sill
+    // ── walnut: the bar's own cladding, left of column A (ref1)
     const L0 = M(-16)
     const R1 = M(18)
     addPlankWall(c, M(COL_A.x0) - L0, H, { x: (L0 + M(COL_A.x0)) / 2, y: fl, depth: wz })
-    addPlankWall(c, R1 - M(WIN.x1), H, { x: (R1 + M(WIN.x1)) / 2, y: fl, depth: wz })
-    addPlankWall(c, M(WIN.x1 - WIN.x0), M(WIN.y0 - 0.14) - fl, { x: M((WIN.x0 + WIN.x1) / 2), y: fl, depth: wz, dir: 'v' })
-    // ── the black-painted header over the window, up to the ceiling
-    box(c, c.M.ceiling, M(WIN.x1 - WIN.x0), ce - M(WIN.y1), wz, M((WIN.x0 + WIN.x1) / 2), (M(WIN.y1) + ce) / 2, wz / 2)
-    // ── the clad columns, floor to ceiling (their sides run back to the wall plane, so
-    // the brick and the window reveal butt them with no gap)
-    for (const k of [COL_A, COL_B]) addPlankColumn(c, M(k.x1 - k.x0), colD + wz, H, { x: M((k.x0 + k.x1) / 2), y: fl, z: 0 })
+    // ── the window bay is black-painted (ref5: the frames, the reveals, the
+    // wall between the doors): the wall right of the window, the panel under
+    // the sill and the header over it, up to the ceiling
+    const wx = M((WIN.x0 + WIN.x1) / 2)
+    const ww = M(WIN.x1 - WIN.x0)
+    box(c, c.M.ceiling, R1 - M(WIN.x1), H, wz, (R1 + M(WIN.x1)) / 2, fl + H / 2, wz / 2)
+    const underH = M(WIN.y0 - 0.14) - fl
+    box(c, c.M.ceiling, ww, underH, wz, wx, fl + underH / 2, wz / 2)
+    box(c, c.M.ceiling, ww, ce - M(WIN.y1), wz, wx, (M(WIN.y1) + ce) / 2, wz / 2)
+    // a satin casing down the window's right edge (the painted wall would
+    // otherwise run into the black frame with nothing to catch the light)
+    box(c, c.M.counter, 0.05, H, 0.022, M(WIN.x1) + 0.025, fl + H / 2, wz + 0.011)
+    // ── column A (walnut) and the black-painted pier between the brick and the
+    // window, floor to ceiling (their sides run back to the wall plane, so the
+    // brick and the window reveal butt them with no gap)
+    addPlankColumn(c, M(COL_A.x1 - COL_A.x0), colD + wz, H, { x: M((COL_A.x0 + COL_A.x1) / 2), y: fl, z: 0 })
+    addPaintedPier(c, M(COL_B.x1 - COL_B.x0), colD + wz, H, { x: M((COL_B.x0 + COL_B.x1) / 2), y: fl })
     // ── the exposed brick bay (the sign is painted over it as its own layer)
     const bw = brickW()
     const bx = M((COL_A.x1 + COL_B.x0) / 2)
@@ -149,6 +160,23 @@ export function makeRoom({ mobile = false } = {}): VisitRoom {
   })
   const bulbs = ['sconceA', 'sconceB', 'pendant'].map(n => kit.anchors[n].clone().multiplyScalar(ROOM_S))
   return { kit, bulbs }
+}
+
+/**
+ * The pier between the brick bay and the window (kit metres), black-painted
+ * like the window bay (ref5): the box in the ceiling's flat black, satin
+ * beads on its front edges and a satin baseboard, so it reads as a painted
+ * volume beside the black frame, not a hole. Back on the wall plane, front
+ * face at d; the cage sconce hangs on its face.
+ */
+function addPaintedPier(c: Ctx, w: number, d: number, h: number, { x = 0, y = 0 } = {}) {
+  const paint = c.M.ceiling
+  const satin = c.M.counter
+  const t = 0.022
+  box(c, paint, w, h, t, x, y + h / 2, d - t / 2)
+  for (const s of [-1, 1]) box(c, paint, t, h, d - t, x + s * (w / 2 - t / 2), y + h / 2, (d - t) / 2)
+  for (const s of [-1, 1]) box(c, satin, 0.03, h, 0.03, x + s * (w / 2 - 0.012), y + h / 2, d - 0.012)
+  box(c, satin, w + 0.02, 0.14, 0.014, x, y + 0.07, d + 0.007)
 }
 
 /**
@@ -317,7 +345,7 @@ const STREET_FRAG = /* glsl */ `
     // the design sits a little low: from inside, the sill hides most of the road
     vec2 p = vP + vec2(0.0, 1.1);
     // ---- night sky over the cornice
-    vec3 c = uSky * (0.55 + 0.45 * smoothstep(16.0, 10.0, p.y));
+    vec3 c = uSky * (0.55 + 0.45 * (1.0 - smoothstep(10.0, 16.0, p.y)));
 
     // ---- two colonial lanterns on posts along the far sidewalk
     vec2 L1 = vec2(5.6, 4.9);
@@ -337,7 +365,7 @@ const STREET_FRAG = /* glsl */ `
       float w = sbox(p, wc, vec2(0.34, 0.66), 0.12);
       float lit = step(0.6, hash(cell + 7.0));
       vec3 dark = uSky * 0.35 + uLamp * 0.035 * glow;
-      vec3 room = uShop * (0.07 + 0.16 * hash(cell + 2.0)) * (0.75 + 0.25 * smoothstep(wc.y + 0.6, wc.y - 0.6, p.y));
+      vec3 room = uShop * (0.07 + 0.16 * hash(cell + 2.0)) * (0.75 + 0.25 * (1.0 - smoothstep(wc.y - 0.6, wc.y + 0.6, p.y)));
       // the sash bar and a half-drawn blind in some
       w *= 1.0 - 0.7 * sbox(p, wc, vec2(0.36, 0.035), 0.03);
       room *= 1.0 - 0.6 * step(0.5, hash(cell + 4.0)) * smoothstep(wc.y + 0.1, wc.y + 0.2, p.y);
@@ -367,7 +395,7 @@ const STREET_FRAG = /* glsl */ `
     c = mix(c, fc, facade);
 
     // ---- the sidewalk, an iron railing, the curb
-    float walk = smoothstep(1.7, 1.5, p.y);
+    float walk = 1.0 - smoothstep(1.5, 1.7, p.y);
     vec3 wk = vec3(0.022, 0.022, 0.028) + uShop * 0.06 * sbox(p, vec2(1.5, 1.4), vec2(1.6, 0.3), 0.4) + uLamp * 0.06 * glow;
     c = mix(c, wk, walk);
     float rail = sbox(vec2(fract(p.x * 5.0) - 0.5, p.y), vec2(0.0, 1.95), vec2(0.06, 0.45), 0.04);
@@ -377,7 +405,7 @@ const STREET_FRAG = /* glsl */ `
     c = mix(c, vec3(0.03, 0.03, 0.035) + uLamp * 0.04 * glow, sbox(p, vec2(0.0, 1.0), vec2(40.0, 0.07), 0.03));
 
     // ---- wet cobbles: rounded setts, glossy, with long reflections
-    float street = smoothstep(0.98, 0.9, p.y);
+    float street = 1.0 - smoothstep(0.9, 0.98, p.y);
     vec2 cs = p * vec2(3.2, 5.6);
     cs.x += mod(floor(cs.y), 2.0) * 0.5;
     vec2 cf = fract(cs) - 0.5;
@@ -422,7 +450,7 @@ const STREET_FRAG = /* glsl */ `
       head += uHead * exp(-dot(p - vec2(fx + 0.6, 0.55), p - vec2(fx + 0.6, 0.55)) * 1.4) * 0.35;
       vec3 tail = uTail * disc(p, vec2(fx - 3.0, 0.7), 0.09, 0.05) * 0.9;
       // its headlight wash thrown ahead on the stones
-      float wash = exp(-((p.x - fx - 2.0) * (p.x - fx - 2.0)) * 0.25) * smoothstep(0.9, 0.2, p.y) * gloss;
+      float wash = exp(-((p.x - fx - 2.0) * (p.x - fx - 2.0)) * 0.25) * (1.0 - smoothstep(0.2, 0.9, p.y)) * gloss;
       c += (head + tail + uHead * wash * 0.3) * uCar;
     }
 
@@ -495,13 +523,15 @@ function spaced(g: CanvasRenderingContext2D, text: string, cx: number, y: number
 /**
  * The sign as a canvas: whitewash letters and rules on transparent, worn
  * through where the paint sat on the mortar and in scuffs here and there.
- * 640 px per world unit; the brick courses fall every 0.3 units from the
- * sign's bottom edge (it sits on a course line).
+ * Laid out on a 2048 × 1024 page (any 2 : 1 canvas); the paint thins on the
+ * brick's mortar courses (the sign sits on a course line).
  */
 export function drawSign(cv: HTMLCanvasElement) {
-  const W = cv.width
-  const H = cv.height
+  // laid out on a 2048 × 1024 page, scaled to the canvas (phones draw it at half size)
+  const W = 2048
+  const H = 1024
   const g = cv.getContext('2d')!
+  g.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0)
   g.clearRect(0, 0, W, H)
   const paint = 'rgba(238, 229, 211, 0.94)'
   g.fillStyle = paint
@@ -557,12 +587,22 @@ export function drawSign(cv: HTMLCanvasElement) {
   g.globalCompositeOperation = 'source-over'
 }
 
-export function makeSign(): { mesh: THREE.Mesh; tex: THREE.CanvasTexture; canvas: HTMLCanvasElement } {
+export interface Sign {
+  mesh: THREE.Mesh
+  tex: THREE.CanvasTexture
+  canvas: HTMLCanvasElement
+}
+
+/**
+ * The painted sign's mesh. Its canvas is 2048 × 1024 (1024 × 512 on phones:
+ * ~2.7 MB of GPU instead of ~10.7) and stays blank until paintSign() draws it
+ * once the display face is in.
+ */
+export function makeSign({ mobile = false } = {}): Sign {
   const { x0, x1, y0, y1 } = SIGN
   const canvas = document.createElement('canvas')
-  canvas.width = 2048
-  canvas.height = 1024
-  drawSign(canvas)
+  canvas.width = mobile ? 1024 : 2048
+  canvas.height = canvas.width / 2
   const tex = new THREE.CanvasTexture(canvas)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 8
@@ -581,6 +621,40 @@ export function makeSign(): { mesh: THREE.Mesh; tex: THREE.CanvasTexture; canvas
   mesh.position.set((x0 + x1) / 2, (y0 + y1) / 2, BRICK_Z + 0.004)
   mesh.receiveShadow = true
   return { mesh, tex, canvas }
+}
+
+/**
+ * Draw the sign ONCE, with Alfa Slab One really there (both font signals:
+ * the face's own load and document.fonts.ready), and free its canvas after
+ * that upload. Resolves once the sign has been drawn; a font slower than
+ * `capMs` gets a fallback draw now and one final redraw when it lands.
+ */
+export async function paintSign(sign: Sign, capMs = 1500): Promise<void> {
+  const fonts = typeof document !== 'undefined' ? document.fonts : undefined
+  const settled: Promise<boolean> = fonts?.load
+    ? Promise.all([fonts.load('400 120px "Alfa Slab One"'), fonts.ready]).then(
+        () => true,
+        () => true,
+      )
+    : Promise.resolve(true)
+  let freed = false
+  const draw = (final: boolean) => {
+    if (freed) return
+    drawSign(sign.canvas)
+    sign.tex.needsUpdate = true
+    // the GPU copy is all that's needed from then on (an 8 MB canvas otherwise)
+    if (final)
+      sign.tex.onUpdate = () => {
+        freed = true
+        sign.canvas.width = sign.canvas.height = 1
+        sign.tex.onUpdate = null
+      }
+  }
+  let timer = 0
+  const inTime = await Promise.race([settled, new Promise<boolean>(r => (timer = window.setTimeout(() => r(false), capMs)))])
+  window.clearTimeout(timer)
+  draw(inTime)
+  if (!inTime) settled.then(() => draw(true))
 }
 
 // ─── the G roundel coaster ──────────────────────────────────────────────────

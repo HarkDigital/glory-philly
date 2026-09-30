@@ -4,8 +4,9 @@
 // the Toast reservations link) and the painted wall sign ("This must be the
 // place"). Don't invent facts: every name, price, hour and line below is
 // sourced. Typos on the source site are fixed only where obvious
-// ("exerience", "Freshno", "POTOATOES", "Dirstrict"); menu text is kept in the
-// site's own words, re-cased from ALL CAPS.
+// ("exerience", "Freshno", "POTOATOES", "Dirstrict", "Drei Fonteinen",
+// "Artisinal"); menu text is kept in the site's own words, re-cased from ALL
+// CAPS.
 
 /** This site. */
 export const SITE = {
@@ -270,7 +271,7 @@ export const BOTTLES: BeerGroup[] = [
       'De Dolle Dulle Teve',
       'De La Senne Taras Boulba',
       'DeRanke Cuvee',
-      'Drei Fonteinen Aarbei Lambic',
+      'Drie Fonteinen Aarbei Lambic',
       'Drie Fonteinen Aarbei Kriek 2021',
       'Drie Fonteinen Cuvee Armand & Gaston',
       'Drie Fonteinen Cuvee Miel',
@@ -289,7 +290,7 @@ export const BOTTLES: BeerGroup[] = [
       'Fantome Spiritus Spring Project',
       'Glazen Toren Ondineke Tripel',
       'Glazen Toren Saison Derpe Mere',
-      'Gurutzeta Sagardo Artisinal Cider',
+      'Gurutzeta Sagardo Artisanal Cider',
       'Gurutzeta Sagardo Natural Cider',
       'Hitachino Anbai Plum',
       'Insight Maturation Vin Jaune',

@@ -6,6 +6,7 @@ import { World } from '../world/World'
 import { clamp, damp } from './math'
 import { buildChapterCopy } from './srContent'
 import { nextFrame } from './yield'
+import { Residency, TEX_CAP } from './residency'
 import type { CameraPose, Chapter, ChapterContext, ChapterDef, Frame } from './types'
 
 export interface ChapterSlot {
@@ -30,12 +31,58 @@ export interface EngineState {
 
 /** Scroll distance (in vh) on each side of a cut where the glitch ramps. */
 const CUT_WINDOW = 0.18
-/** seconds a time-driven jump cut takes to cover the frame (then it swaps and clears in 0.5 s) */
+/*
+ * NAV JUMPS (land() beyond smooth range) are a time-driven pour:
+ *   in   — the cover climbs (JUMP_IN s; linear and a little slower when calm)
+ *   hold — full cover: swap to the target, and stay covered until JUMP_HOLD s
+ *          after the LAST target, so a burst of Tabs / pip clicks reads as ONE
+ *          pour in and one out (every new target meanwhile swaps under cover)
+ *   out  — the drain (JUMP_OUT s). A near target meanwhile smooth-scrolls
+ *          under the lacing; a far one climbs back, never sooner than
+ *          ONSET_GAP s after the last climb began (pin: the cover waits)
+ * WCAG 2.3.1: a Tab every 0.3–0.6 s used to re-pour 4–5 times a second.
+ */
 const JUMP_IN = 0.26
+const JUMP_IN_CALM = 0.3
+const JUMP_OUT = 0.5
+const JUMP_HOLD = 0.35
+const ONSET_GAP = 0.8
+/** land() smooth-scrolls only short steps: forward ≤ 1.5 vh, back ≤ 0.6 vh */
+const nearStep = (d: number) => d >= -0.6 && d <= 1.5
+/**
+ * Scroll cut hold: after a boundary peak the cover holds (no decay) for
+ * PEAK_GRACE s, and a scroll reversal within REVERSE_ZONE vh of a boundary
+ * soon after a peak (a hesitating trackpad) keeps holding it until 0.5 s
+ * pass with no new peak or reversal: the level never bobs with the wiggle.
+ */
+const PEAK_GRACE = 0.2
+const REVERSE_ZONE = 0.6
+/** calm (reduced motion / Motion off): the cut is a dark fade, capped, with a damped attack */
+const CALM_FADE = 0.85
+const CALM_ATTACK = 0.25
 /** Render-pixel budget: 4K/5K windows would otherwise push 15+ MP through bloom. */
 const PIXEL_BUDGET = 6e6
-/** device pixels of three's glass (transmission) buffer on desktop; it only ever shrinks with the frame (Frost's lesson) */
-const GLASS_BUDGET = 1.9e6
+/**
+ * device pixels of three's glass (transmission) buffer on desktop; it only
+ * ever shrinks with the frame (Frost's lesson). three r186 makes that target
+ * 4x MSAA half-float with mipmaps whatever we ask, so every pixel costs ~52
+ * bytes: 0.8 MP is ~0.79 of a 1440x900 DPR-1 frame (~45 MB instead of ~73)
+ * and ~0.39 at DPR 2 — thin glass refracting a soft room shows no difference.
+ */
+const GLASS_BUDGET = 0.8e6
+
+type JumpPhase = 'in' | 'hold' | 'out' | 'pin'
+interface Jump {
+  id: string
+  local: number
+  phase: JumpPhase
+  /** progress through the current climb / drain, 0..1 */
+  p: number
+  /** current cover 0..1 */
+  cover: number
+  /** seconds (performance.now) of the latest target */
+  lastTarget: number
+}
 
 function emptyChapter(id: string): Chapter {
   return {
@@ -101,7 +148,11 @@ export class Engine {
   private dprCeil = 1
   private ceilFor = 0
   /** time-driven cut used for long nav jumps (so we never scrub through five chapters) */
-  private jump: { t: number; id: string; local: number; swapped: boolean } | null = null
+  private jump: Jump | null = null
+  /** seconds (performance.now) the last jump climb began */
+  private lastOnset = -1e9
+  /** GPU texture residency (textures that can reload are freed while far away) */
+  private residency: Residency
   /** true while something (e.g. the rotate gate) covers the scene — skip rendering */
   paused = false
   private cutHold = 0
@@ -109,6 +160,11 @@ export class Engine {
   private rapidUntil = 0
   private cutOutState = 0
   private cutPeakAt = -1e9
+  /** scroll-boundary hold (see PEAK_GRACE): last scroll direction, last reversal near a boundary, hold-until */
+  private scrollDir = 0
+  private sustainUntil = 0
+  /** the calm fade as shown (rate-limited attack) */
+  private calmFade = 0
   /**
    * Ambient motion on/off. When off, frame.time holds still once the intro
    * reveal has had time to play (3 s after 'hark:reveal').
@@ -180,10 +236,13 @@ export class Engine {
     this.world = new World(this.scene, this.mobile, this.renderer)
     this.scene.add(this.world.object)
     this.assets = new Assets(this.renderer)
+    this.residency = new Residency(this.renderer)
     // MSAA only where it pays: 1x desktop screens. Retina is already supersampled,
     // and multisampled half-float ping-pong targets cost ~1 GB of VRAM there.
     const msaa = !this.mobile && (window.devicePixelRatio || 1) < 1.5
     this.post = new Post(this.renderer, this.scene, this.camera, !msaa)
+    // phones get the 6-pass bloom from the start (adaptResolution extends it to scaled-down desktops)
+    this.post.setLite(this.mobile)
 
     this.frame = {
       time: 0,
@@ -350,6 +409,7 @@ export class Engine {
         stage,
         mobile: this.mobile,
         reducedMotion: this.reducedMotion,
+        texRes: (px, scale = 1) => Math.max(1, Math.round(Math.min(px, (this.mobile ? TEX_CAP.mobile : TEX_CAP.desktop) * scale))),
       }
       const slot: ChapterSlot = {
         def,
@@ -552,41 +612,85 @@ export class Engine {
 
   /**
    * Navigate to a chapter the way a visitor should see it. Neighbours scroll
-   * smoothly; longer jumps cut (flash out, jump, flash in) instead of scrubbing
-   * through every chapter in between.
+   * smoothly; longer jumps cut (pour in, jump, drain) instead of scrubbing
+   * through every chapter in between. See JUMP_IN for the jump's phases.
    */
   land(id: string, smooth = true, at?: number) {
     const target = this.slots.findIndex(s => s.def.id === id)
     if (target < 0) return
     const local = at ?? this.landingFor(id)
     if (!smooth) return this.gotoChapter(id, local)
-    // a jump already in flight (a burst of pip/nav clicks): retarget it, so the
-    // burst reads as ONE dissolve out and one in (never a train of cuts)
-    if (this.jump) {
-      if (!this.jump.swapped) {
-        this.jump.id = id
-        this.jump.local = local
-      } else {
-        // already fading in: climb back from the current cover, then swap again
-        const cover = this.jumpCover
-        this.jump = { t: JUMP_IN * Math.sqrt(Math.max(0, Math.min(1, cover))), id, local, swapped: false }
+    const dest = this.slots[target].start + clamp(local) * this.slots[target].def.length
+    const calm = this.reducedMotion || !this.motion
+    const now = performance.now() / 1000
+    // a jump already in flight (a burst of Tabs / pip / nav clicks): fold the
+    // new target into it, so the burst reads as ONE pour in and one out
+    const j = this.jump
+    if (j) {
+      const prev = this.jumpDest(j)
+      j.id = id
+      j.local = local
+      j.lastTarget = now
+      if (j.phase === 'hold') {
+        // fully covered: go straight there (the hold restarts from now)
+        this.scrollToVh(dest)
+      } else if (j.phase === 'out') {
+        if (nearStep(dest - prev)) {
+          // close to what the drain is revealing: move there under the lacing
+          this.scrollToVh(dest, !calm)
+        } else if (now - this.lastOnset >= ONSET_GAP) {
+          // far: climb back from the current cover…
+          j.phase = 'in'
+          j.p = calm ? j.cover : Math.sqrt(j.cover)
+          this.lastOnset = now
+        } else {
+          // …but never two climbs within ONSET_GAP: the cover waits where it is
+          j.phase = 'pin'
+        }
       }
+      // 'in' / 'pin': still covering — the swap goes to the new target
       return
     }
     // Smooth scroll only for a short step: forward up to 1.5 vh (the next
     // chapter's landing), back up to 0.6 vh (Shift+Tab through items). Anything
     // else cuts: a long smooth scroll pans the camera past lit items (a flash),
     // and backwards, time-paced chapters (StoryClock) would replay every item
-    // in reverse before the target shows.
-    const slot = this.slots[target]
-    const d = slot.start + clamp(local) * slot.def.length - this.lenis.scroll / this.vh
+    // in reverse before the target shows. Measured from where the scroll is
+    // HEADING, so a Tab chain of short steps stays a chain of short steps.
+    const d = dest - this.lenis.targetScroll / this.vh
     if (Math.abs(d) < 0.01) return
-    if (d >= -0.6 && d <= 1.5) return this.gotoChapter(id, local, true)
-    this.jump = { t: 0, id, local, swapped: false }
+    if (calm && target === this.state.index) {
+      // calm, within the chapter (Tab through its items): a plain cut with the
+      // copy cross-faded — no fade through dark per stop (that doubled every
+      // change into a dip and a rise)
+      this.scrollToVh(dest)
+      this.softenStage()
+      return
+    }
+    if (!calm && nearStep(d)) return this.scrollToVh(dest, true)
+    this.jump = { id, local, phase: 'in', p: 0, cover: 0, lastTarget: now }
+    this.lastOnset = now
   }
 
-  /** current cover (0..1) of a time-driven jump cut */
-  private jumpCover = 0
+  /** the scroll position (vh) a jump lands on */
+  private jumpDest(j: Jump) {
+    const slot = this.slots.find(s => s.def.id === j.id)
+    return slot ? slot.start + clamp(j.local) * slot.def.length : this.lenis.scroll / this.vh
+  }
+
+  /** scroll to a track position in vh (+1 px so the chapter owning it is unambiguous) */
+  private scrollToVh(vh: number, smooth = false) {
+    this.lenis.scrollTo(vh * this.vh + 1, smooth ? { duration: 1.8, force: true } : { immediate: true, force: true })
+  }
+
+  /** calm in-chapter cut: the stage copy fades back in over 0.15 s instead of popping */
+  private softenStage() {
+    try {
+      this.stages.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' })
+    } catch {
+      /* no WAAPI */
+    }
+  }
 
   /**
    * Move keyboard focus to a chapter's heading in the copy layer (after an
@@ -725,7 +829,9 @@ export class Engine {
       this.perfEma = this.baseline
       this.resize()
     }
-    document.documentElement.classList.toggle('lowfx', this.mobile || this.dprScale < 0.99)
+    const low = this.mobile || this.dprScale < 0.99
+    document.documentElement.classList.toggle('lowfx', low)
+    this.post.setLite(low)
   }
 
   private applyCamera(parallax: number) {
@@ -749,34 +855,39 @@ export class Engine {
     }
   }
 
-  /** 0..1 strength of a time-driven cut in progress (long nav jumps). */
-  private jumpFx(dt: number) {
-    const v = this.jumpStep(dt)
-    this.jumpCover = v
-    return v
-  }
-
+  /** 0..1 cover of a time-driven jump cut in progress (long nav jumps; see JUMP_IN). */
   private jumpStep(dt: number) {
     const j = this.jump
     if (!j) return 0
-    const IN = JUMP_IN
-    const OUT = 0.5
-    j.t += dt
-    if (j.t < IN) {
-      const x = j.t / IN
-      return x * x
+    const calm = this.reducedMotion || !this.motion
+    const now = performance.now() / 1000
+    if (j.phase === 'pin') {
+      if (now - this.lastOnset < ONSET_GAP) return j.cover
+      j.phase = 'in'
+      j.p = calm ? j.cover : Math.sqrt(j.cover)
+      this.lastOnset = now
     }
-    if (!j.swapped) {
-      j.swapped = true
-      const slot = this.slots.find(s => s.def.id === j.id)
-      if (slot) {
-        const y = (slot.start + j.local * slot.def.length) * this.vh + 1
-        this.lenis.scrollTo(y, { immediate: true, force: true })
-      }
+    if (j.phase === 'in') {
+      // calm climbs linearly (the dark fade's attack is rate-limited anyway)
+      j.p = Math.min(1, j.p + dt / (calm ? JUMP_IN_CALM : JUMP_IN))
+      j.cover = calm ? j.p : j.p * j.p
+      if (j.p < 1) return j.cover
+      // full cover: swap to the (latest) target
+      j.phase = 'hold'
+      this.scrollToVh(this.jumpDest(j))
     }
-    const out = clamp((j.t - IN) / OUT)
-    if (out >= 1) this.jump = null
-    return 1 - out * out * (3 - 2 * out)
+    if (j.phase === 'hold') {
+      j.cover = 1
+      if (now - j.lastTarget < JUMP_HOLD) return 1
+      j.phase = 'out'
+      j.p = 0
+      return 1
+    }
+    // out: the drain
+    j.p = Math.min(1, j.p + dt / JUMP_OUT)
+    j.cover = 1 - j.p * j.p * (3 - 2 * j.p)
+    if (j.p >= 1) this.jump = null
+    return j.cover
   }
 
   private tick() {
@@ -791,10 +902,11 @@ export class Engine {
     f.pointer.x = damp(f.pointer.x, f.pointerRaw.x, 3.5, f.dt)
     f.pointer.y = damp(f.pointer.y, f.pointerRaw.y, 3.5, f.dt)
 
-    const fx = this.jumpFx(f.dt)
+    const fx = this.jumpStep(f.dt)
 
     const scrollVh = this.lenis.scroll / this.vh
-    const vel = (scrollVh - this.lastScrollVh) / Math.max(f.dt, 1e-3)
+    const dScroll = scrollVh - this.lastScrollVh
+    const vel = dScroll / Math.max(f.dt, 1e-3)
     this.lastScrollVh = scrollVh
     // a nav jump teleports the scroll; don't let it register as warp speed
     f.velocity = this.jump ? damp(f.velocity, 0, 8, f.dt) : damp(f.velocity, vel, 8, f.dt)
@@ -811,30 +923,43 @@ export class Engine {
     const slot = this.slots[index]
     if (!slot) return
     const local = clamp((scrollVh - slot.start) / slot.def.length)
-    // one site-wide glass buffer from a device-pixel budget (~0.6 of a DPR-2
-    // frame); never resized per chapter, and only shrinks with adaptive DPR
+    // one site-wide glass buffer from a device-pixel budget (GLASS_BUDGET);
+    // never resized per chapter, and only shrinks with adaptive DPR
     const ts = this.mobile ? 0.5 : clamp(Math.sqrt(GLASS_BUDGET / Math.max(1, this.cw * this.ch * this.dpr * this.dpr)), 0.35, 1)
     if (this.renderer.transmissionResolutionScale !== ts) this.renderer.transmissionResolutionScale = ts
 
-    // glitch ramps up approaching any internal cut and back down after it
+    // the pour rises approaching any internal boundary and drains after it
     let d = Infinity
     for (let i = 1; i < this.slots.length; i++) d = Math.min(d, Math.abs(scrollVh - this.slots[i].start))
     const tr = clamp(1 - d / CUT_WINDOW)
-    const cut = Math.max(tr * tr * (3 - 2 * tr), fx)
+    const edge = tr * tr * (3 - 2 * tr)
     // cut budget (WCAG 2.3.1): while boundaries come fast (a quick scroll or
     // a cut peaked < 0.5 s ago) hold the transition so they merge into one
     // continuous sheet instead of a train of full-frame dips
     const now = performance.now()
-    if (cut > 0.9) this.cutPeakAt = now
-    this.cutHold = Math.max(this.cutHold * Math.exp(-f.dt / 0.45), cut)
+    if (edge > 0.9) {
+      this.cutPeakAt = now
+      if (now < this.sustainUntil) this.sustainUntil = now + 500
+    }
+    // a scroll reversal close to a boundary soon after its peak (a hesitating
+    // trackpad rocking over the cut): hold the cover instead of letting it
+    // decay and re-rise with every rock (the level bobbed 3–5 times a second)
+    if (!this.jump && Math.abs(dScroll) > 0.002 && Math.abs(dScroll) < 0.5) {
+      const dir = Math.sign(dScroll)
+      if (this.scrollDir && dir !== this.scrollDir && d < REVERSE_ZONE && now - this.cutPeakAt < 900) this.sustainUntil = now + 500
+      this.scrollDir = dir
+    }
+    const holding = now - this.cutPeakAt < PEAK_GRACE * 1000 || now < this.sustainUntil
+    this.cutHold = holding ? Math.max(this.cutHold, edge) : Math.max(this.cutHold * Math.exp(-f.dt / 0.45), edge)
     // "rapid" latches for 400 ms (a reduced-motion wheel moves the scroll in
     // single-frame steps, so velocity flickers across the threshold), and the
     // cut never drops to zero in one frame: it can only fall at a 0.2 s rate
-    if (now - this.cutPeakAt < 500 || Math.abs(f.velocity) > 3) this.rapidUntil = now + 400
+    if (holding || now - this.cutPeakAt < 500 || Math.abs(f.velocity) > 3) this.rapidUntil = now + 400
     const rapid = now < this.rapidUntil
-    const cutTarget = rapid ? Math.max(cut, this.cutHold) : cut
-    this.cutOutState = this.jump ? cutTarget : Math.max(cutTarget, this.cutOutState * Math.exp(-f.dt / 0.2))
-    const cutOut = this.cutOutState
+    const edgeTarget = rapid ? Math.max(edge, this.cutHold) : edge
+    this.cutOutState = Math.max(edgeTarget, this.cutOutState * Math.exp(-f.dt / 0.2))
+    // a nav jump's own cover (time-driven: it holds and drains by itself)
+    const cutOut = Math.max(this.cutOutState, fx)
     // the chapter's DOM copy fades while the cut covers the frame; CSS reads --cut
     const cutCss = Math.round(cutOut * 50) / 50
     if (cutCss !== this.cutCss) {
@@ -848,12 +973,17 @@ export class Engine {
     // which side of the nearest boundary we're on (+1 leaving a chapter, -1 entering one)
     this.post.cutSide = local > 0.5 ? 1 : -1
     if (calm) {
-      // no cab cut: a calm fade through near-black
+      // no pour: a calm fade through the dark of the room (never toward a
+      // light colour — over a dark scene that was a full-frame flash), capped,
+      // and its attack rate-limited so a wheel notch can't slam it shut
       this.post.transition = 0
-      this.post.fade = cutOut * 0.9
+      const target = cutOut * CALM_FADE
+      this.calmFade = target > this.calmFade ? Math.min(target, this.calmFade + (CALM_FADE / CALM_ATTACK) * f.dt) : target
+      this.post.fade = this.calmFade
     } else {
       this.post.transition = cutOut
       this.post.fade = 0
+      this.calmFade = 0
     }
 
     if (index !== this.state.index || !slot.chapter.group.visible) {
@@ -944,6 +1074,17 @@ export class Engine {
         if (!this.listenerFailed.has(fn)) console.error('[hark] frame listener failed', err)
         this.listenerFailed.add(fn)
       }
+    }
+    // free / rebuild reloadable textures by distance from the chapter on screen
+    // (after the reveal: prewarm has uploaded everything once by then)
+    if (this.revealAt >= 0) {
+      const target = this.jump ? this.slots.findIndex(s => s.def.id === this.jump!.id) : -1
+      this.residency.update(
+        () => this.slots.map(s => s.chapter.group),
+        this.world.object,
+        index,
+        target,
+      )
     }
     this.renderer.info.reset()
     this.post.render(f.dt, f.time)

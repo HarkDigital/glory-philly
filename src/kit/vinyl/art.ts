@@ -117,8 +117,55 @@ export function onFonts(draw: () => void): Promise<void> {
 
 type Ctx = CanvasRenderingContext2D
 
-const track = (ctx: Ctx, px: number) => {
-  ;(ctx as Ctx & { letterSpacing?: string }).letterSpacing = `${px}px`
+/*
+ * Tracking (letter-spacing) that works everywhere. Canvas `letterSpacing`
+ * is missing in Safari (the build targets safari15) and Firefox < 115; there,
+ * setting it is a silent no-op and every tracked-caps label drew untracked.
+ * setTracking() records the tracking per context and uses the native property
+ * where it exists; fillText() / measure() below honour it, placing each
+ * character at its kerned origin + i × tracking where it doesn't, with the
+ * same metrics Chrome uses (tracking after every character, the last one
+ * included), so layouts, fits and ellipses match across engines.
+ * Draw and measure tracked text through fillText()/measure(), never
+ * ctx.fillText()/ctx.measureText().
+ */
+const NATIVE_TRACKING = typeof CanvasRenderingContext2D !== 'undefined' && 'letterSpacing' in CanvasRenderingContext2D.prototype
+const tracking = new WeakMap<Ctx, number>()
+
+/** Set the tracking (px) for later fillText()/measure() calls on this context (0 = none). */
+export function setTracking(ctx: Ctx, px: number) {
+  if (NATIVE_TRACKING) (ctx as Ctx & { letterSpacing: string }).letterSpacing = `${px}px`
+  if (px) tracking.set(ctx, px)
+  else tracking.delete(ctx)
+}
+/** the tracking set on this context with setTracking() */
+export const getTracking = (ctx: Ctx) => tracking.get(ctx) ?? 0
+/** tracking the browser won't apply itself (0 where canvas letterSpacing exists) */
+const emulated = (ctx: Ctx) => (NATIVE_TRACKING ? 0 : (tracking.get(ctx) ?? 0))
+const track = setTracking
+
+/** user-perceived characters (a base + its combining marks) */
+const clusters = (text: string) => text.match(/\P{M}\p{M}*/gu) ?? []
+
+/** width of a plain run at the current font and tracking */
+function runWidth(ctx: Ctx, text: string) {
+  const w = ctx.measureText(text).width
+  const sp = emulated(ctx)
+  return sp ? w + clusters(text).length * sp : w
+}
+/** a plain run, left-aligned at x; emulated tracking places each character at its kerned origin */
+function drawRun(ctx: Ctx, text: string, x: number, y: number) {
+  const sp = emulated(ctx)
+  if (!sp) {
+    ctx.fillText(text, x, y)
+    return
+  }
+  let prefix = ''
+  clusters(text).forEach((c, i) => {
+    prefix += c
+    // measure(prefix) − measure(c) keeps the kern between c and the character before it
+    ctx.fillText(c, x + ctx.measureText(prefix).width - ctx.measureText(c).width + i * sp, y)
+  })
 }
 
 /** a sub / note line: Inter Tight, sentence case */
@@ -131,24 +178,26 @@ const pxOf = (font: string) => {
   const m = /(\d+(?:\.\d+)?)px/.exec(font)
   return m ? parseFloat(m[1]) : 16
 }
-/** width of `text` at the current font, "⅓" measured the way fillText() sets it */
+/** width of `text` at the current font and tracking, "⅓" measured the way fillText() sets it */
 export function measure(ctx: Ctx, text: string): number {
-  if (!text.includes(FRAC)) return ctx.measureText(text).width
+  if (!text.includes(FRAC)) return runWidth(ctx, text)
   const font = ctx.font
   const px = pxOf(font)
   const parts = text.split(FRAC)
-  let w = parts.reduce((a, p) => a + ctx.measureText(p).width, 0)
+  let w = parts.reduce((a, p) => a + runWidth(ctx, p), 0)
   ctx.font = font.replace(/(\d+(?:\.\d+)?)px/, `${(px * 0.62).toFixed(2)}px`)
-  w += (parts.length - 1) * (ctx.measureText('1').width + ctx.measureText('3').width + px * 0.14)
+  w += (parts.length - 1) * (runWidth(ctx, '1') + runWidth(ctx, '3') + px * 0.14)
   ctx.font = font
   return w
 }
 /**
- * ctx.fillText that honours textAlign and sets "⅓" from the face's own
+ * ctx.fillText that honours textAlign and the tracking set with
+ * setTracking() (in every browser), and sets "⅓" from the face's own
  * figures (a raised 1, a fraction slash, a 3) so it never falls back.
  */
 export function fillText(ctx: Ctx, text: string, x: number, y: number) {
-  if (!text.includes(FRAC)) {
+  const frac = text.includes(FRAC)
+  if (!frac && !emulated(ctx)) {
     ctx.fillText(text, x, y)
     return
   }
@@ -159,15 +208,20 @@ export function fillText(ctx: Ctx, text: string, x: number, y: number) {
   const total = measure(ctx, text)
   let cx = align === 'right' || align === 'end' ? x - total : align === 'center' ? x - total / 2 : x
   ctx.textAlign = 'left'
+  if (!frac) {
+    drawRun(ctx, text, cx, y)
+    ctx.textAlign = align
+    return
+  }
   const parts = text.split(FRAC)
   parts.forEach((p, i) => {
     ctx.font = font
-    ctx.fillText(p, cx, y)
-    cx += ctx.measureText(p).width
+    drawRun(ctx, p, cx, y)
+    cx += runWidth(ctx, p)
     if (i === parts.length - 1) return
     ctx.font = small
-    ctx.fillText('1', cx, y - px * 0.3)
-    cx += ctx.measureText('1').width
+    drawRun(ctx, '1', cx, y - px * 0.3)
+    cx += runWidth(ctx, '1')
     // the fraction slash
     ctx.save()
     ctx.strokeStyle = ctx.fillStyle
@@ -178,8 +232,8 @@ export function fillText(ctx: Ctx, text: string, x: number, y: number) {
     ctx.stroke()
     ctx.restore()
     cx += px * 0.14
-    ctx.fillText('3', cx, y)
-    cx += ctx.measureText('3').width
+    drawRun(ctx, '3', cx, y)
+    cx += runWidth(ctx, '3')
   })
   ctx.font = font
   ctx.textAlign = align
@@ -190,7 +244,7 @@ export function fit(ctx: Ctx, text: string, font: (px: number) => string, px: nu
   let s = px
   for (let i = 0; i < 12; i++) {
     ctx.font = font(s)
-    const w = ctx.measureText(text).width
+    const w = measure(ctx, text)
     if (w <= maxW || s <= min) break
     s = Math.max(min, s * (maxW / w) * 0.995)
   }
@@ -198,14 +252,14 @@ export function fit(ctx: Ctx, text: string, font: (px: number) => string, px: nu
   return s
 }
 
-/** Truncate with an ellipsis to fit maxW at the current font. */
+/** Truncate with an ellipsis to fit maxW at the current font and tracking. */
 function ellipsize(ctx: Ctx, text: string, maxW: number) {
-  if (ctx.measureText(text).width <= maxW) return text
+  if (measure(ctx, text) <= maxW) return text
   let lo = 0
   let hi = text.length
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1
-    if (ctx.measureText(text.slice(0, mid).trimEnd() + '…').width <= maxW) lo = mid
+    if (measure(ctx, text.slice(0, mid).trimEnd() + '…') <= maxW) lo = mid
     else hi = mid - 1
   }
   return text.slice(0, lo).trimEnd() + '…'
@@ -217,7 +271,7 @@ function wrap(ctx: Ctx, text: string, maxW: number): string[] {
   let line = ''
   for (const w of words) {
     const t = line ? `${line} ${w}` : w
-    if (ctx.measureText(t).width > maxW && line) {
+    if (measure(ctx, t) > maxW && line) {
       lines.push(line)
       line = w
     } else line = t
@@ -233,7 +287,7 @@ function fitBlock(ctx: Ctx, text: string, font: (px: number) => string, maxPx: n
   for (let i = 0; i < 24; i++) {
     ctx.font = font(px)
     lines = wrap(ctx, text, w)
-    const widest = Math.max(...lines.map(l => ctx.measureText(l).width))
+    const widest = Math.max(...lines.map(l => measure(ctx, l)))
     if (lines.length <= maxLines && widest <= w && lines.length * px * lead <= h) break
     px *= 0.93
   }
@@ -243,8 +297,10 @@ function fitBlock(ctx: Ctx, text: string, font: (px: number) => string, maxPx: n
 
 /** Characters around a circle, clockwise from `start` (radians, 0 = right, -π/2 = top), filling the ring. */
 export function ringText(ctx: Ctx, text: string, cx: number, cy: number, R: number, px: number, color: string, start = -Math.PI / 2, font = FONT.mono) {
+  const prevTracking = getTracking(ctx)
   ctx.save()
   ctx.font = `600 ${px}px ${font}`
+  // spaced by hand (px × 0.16 per character), in every browser
   track(ctx, 0)
   ctx.fillStyle = color
   ctx.textBaseline = 'alphabetic'
@@ -270,6 +326,7 @@ export function ringText(ctx: Ctx, text: string, cx: number, cy: number, R: numb
     }
   }
   ctx.restore()
+  track(ctx, prevTracking)
 }
 
 /** the site mark's G (src/ui/mark.ts, viewBox 0 0 100 100): one closed contour, no font needed */
@@ -443,24 +500,24 @@ export function drawLabel(ctx: Ctx, x0: number, y0: number, size: number, s: Lab
     fillText(ctx, `${rpm} RPM`, c + u(166), c + u(6))
     track(ctx, 0)
     const tpx = fit(ctx, s.title, px => `400 ${px}px ${FONT.display}`, u(30), u(250), u(12))
-    ctx.fillText(s.title, c, c + u(140) + tpx * 0.35)
+    fillText(ctx, s.title, c, c + u(140) + tpx * 0.35)
     if (s.sub) {
       ctx.fillStyle = sc.muted
       fit(ctx, s.sub, px => subFont(px), u(18), u(200), u(10))
-      ctx.fillText(ellipsize(ctx, s.sub, u(200)), c, c + u(172) + tpx * 0.2)
+      fillText(ctx, ellipsize(ctx, s.sub, u(200)), c, c + u(172) + tpx * 0.2)
     }
     if (s.cat) {
       ctx.fillStyle = sc.fg
       track(ctx, u(2))
       ctx.font = capsFont(u(11))
-      ctx.fillText(s.cat, c, c - u(118))
+      fillText(ctx, s.cat, c, c - u(118))
     }
   } else {
     drawRoundel(ctx, c, c - u(132), u(50))
     track(ctx, u(2.4))
     ctx.font = capsFont(u(10.5))
     ctx.fillStyle = sc.muted
-    ctx.fillText('GLORY RECORDS', c, c - u(66))
+    fillText(ctx, 'GLORY RECORDS', c, c - u(66))
     ctx.fillStyle = sc.fg
     track(ctx, u(2.2))
     ctx.font = capsFont(u(14.5))
@@ -468,16 +525,16 @@ export function drawLabel(ctx: Ctx, x0: number, y0: number, size: number, s: Lab
     fillText(ctx, rpm, c + u(112), c + u(5))
     track(ctx, 0)
     const tpx = fit(ctx, s.title, px => `400 ${px}px ${FONT.display}`, u(38), u(300), u(14))
-    ctx.fillText(s.title, c, c + u(62) + tpx * 0.35)
+    fillText(ctx, s.title, c, c + u(62) + tpx * 0.35)
     if (s.sub) {
       ctx.fillStyle = sc.muted
       fit(ctx, s.sub, px => subFont(px), u(21), u(280), u(11))
-      ctx.fillText(ellipsize(ctx, s.sub, u(280)), c, c + u(98) + tpx * 0.35)
+      fillText(ctx, ellipsize(ctx, s.sub, u(280)), c, c + u(98) + tpx * 0.35)
     }
     ctx.fillStyle = sc.fg
     track(ctx, u(2.4))
     ctx.font = capsFont(u(11.5))
-    ctx.fillText(`${s.cat ?? catNo(1)} · STEREO`, c, c + u(150))
+    fillText(ctx, `${s.cat ?? catNo(1)} · STEREO`, c, c + u(150))
   }
   track(ctx, 0)
   ctx.textAlign = 'left'
@@ -534,7 +591,7 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
     track(ctx, u(3.2))
     ctx.font = capsFont(u(19))
     ctx.textAlign = 'left'
-    ctx.fillText('GLORY RECORDS', u(44), u(62))
+    fillText(ctx, 'GLORY RECORDS', u(44), u(62))
     ctx.textAlign = 'right'
     fillText(ctx, `${cat} · 33⅓`, size - u(44), u(62))
     // band
@@ -554,16 +611,16 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
     if (s.sub) {
       ctx.fillStyle = sc.muted
       fit(ctx, s.sub, px => subFont(px), u(29), tw, u(21))
-      ctx.fillText(ellipsize(ctx, s.sub, tw), u(45), subY)
+      fillText(ctx, ellipsize(ctx, s.sub, tw), u(45), subY)
     }
     ctx.fillStyle = sc.fg
     ctx.font = `400 ${tpx}px ${FONT.display}`
-    ctx.fillText(s.title, u(42), titleY)
+    fillText(ctx, s.title, u(42), titleY)
     if (s.kicker) {
       ctx.fillStyle = sc.accent === sc.fg ? sc.muted : sc.accent
       track(ctx, u(3))
       ctx.font = capsFont(u(19))
-      ctx.fillText(ellipsize(ctx, s.kicker.toUpperCase(), tw), u(45), titleY - tpx * 0.74 - u(20))
+      fillText(ctx, ellipsize(ctx, s.kicker.toUpperCase(), tw), u(45), titleY - tpx * 0.74 - u(20))
     }
   } else {
     // typographic cover: header rule, a big slab title, the record's rings bleeding off
@@ -591,9 +648,9 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
     track(ctx, u(3))
     ctx.font = capsFont(u(19))
     ctx.textAlign = 'left'
-    ctx.fillText('GLORY RECORDS', m, u(76))
+    fillText(ctx, 'GLORY RECORDS', m, u(76))
     ctx.textAlign = 'right'
-    ctx.fillText(cat, size - m, u(76))
+    fillText(ctx, cat, size - m, u(76))
     ctx.fillRect(m, u(96), size - 2 * m, Math.max(1, u(3)))
     ctx.textAlign = 'left'
     let y = u(150)
@@ -601,7 +658,7 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
       ctx.fillStyle = sc.accent === sc.fg ? sc.muted : sc.accent
       track(ctx, u(3.4))
       ctx.font = capsFont(u(22))
-      ctx.fillText(ellipsize(ctx, s.kicker.toUpperCase(), size - 2 * m), m, y)
+      fillText(ctx, ellipsize(ctx, s.kicker.toUpperCase(), size - 2 * m), m, y)
       y += u(24)
     }
     ctx.fillStyle = sc.fg
@@ -609,13 +666,13 @@ export function drawCover(ctx: Ctx, x0: number, y0: number, size: number, s: Cov
     const blk = fitBlock(ctx, s.title, px => `400 ${px}px ${FONT.display}`, u(190), size - 2 * m, u(430), 3, 0.98)
     for (const l of blk.lines) {
       y += blk.px * 0.98
-      ctx.fillText(l, m - u(4), y)
+      fillText(ctx, l, m - u(4), y)
     }
     if (s.sub) {
       ctx.fillStyle = sc.muted
       ctx.font = subFont(u(38))
       const lines = wrap(ctx, s.sub, u(540)).slice(0, 3)
-      lines.forEach((l, i) => ctx.fillText(l, m, y + u(72) + i * u(50)))
+      lines.forEach((l, i) => fillText(ctx, l, m, y + u(72) + i * u(50)))
     }
     ctx.fillStyle = sc.fg
     track(ctx, u(2.6))
@@ -692,20 +749,20 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
   track(ctx, u(2.8))
   ctx.font = capsFont(u(18))
   ctx.textAlign = 'left'
-  ctx.fillText(`${cat} · STEREO`, m, u(66))
+  fillText(ctx, `${cat} · STEREO`, m, u(66))
   ctx.textAlign = 'right'
-  ctx.fillText('GLORY BEER BAR & KITCHEN', size - m, u(66))
+  fillText(ctx, 'GLORY BEER BAR & KITCHEN', size - m, u(66))
   ctx.fillRect(m, u(84), W, Math.max(1, u(2.5)))
   ctx.textAlign = 'left'
   track(ctx, 0)
   const tpx = fit(ctx, s.title, px => `400 ${px}px ${FONT.display}`, u(84), W, u(36))
   let y = u(100) + tpx * 0.92
-  ctx.fillText(s.title, m - u(3), y)
+  fillText(ctx, s.title, m - u(3), y)
   if (s.sub) {
     ctx.fillStyle = sc.muted
     fit(ctx, s.sub, px => subFont(px), u(31), W, u(20))
     y += u(46)
-    ctx.fillText(ellipsize(ctx, s.sub, W), m, y)
+    fillText(ctx, ellipsize(ctx, s.sub, W), m, y)
   }
   y += u(34)
 
@@ -768,7 +825,7 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
         ctx.fillStyle = sc.accent === sc.fg ? sc.fg : sc.accent
         track(ctx, px * 0.16)
         ctx.font = capsFont(px * 0.84)
-        ctx.fillText(ellipsize(ctx, l.text, colW), cx, ly)
+        fillText(ctx, ellipsize(ctx, l.text, colW), cx, ly)
         track(ctx, 0)
         ctx.globalAlpha = 0.35
         ctx.fillStyle = sc.fg
@@ -778,32 +835,32 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
         ctx.fillStyle = sc.muted
         track(ctx, 0)
         ctx.font = subFont(px * 0.78)
-        if (l.n) ctx.fillText(l.n, cx, ly)
+        if (l.n) fillText(ctx, l.n, cx, ly)
         // value
         let vw = 0
         if (l.value) {
           ctx.fillStyle = sc.fg
           ctx.font = subFont(px * 0.92, 600)
           ctx.textAlign = 'right'
-          ctx.fillText(l.value, cx + colW, ly)
+          fillText(ctx, l.value, cx + colW, ly)
           ctx.textAlign = 'left'
-          vw = ctx.measureText(l.value).width + px * 0.5
+          vw = measure(ctx, l.value) + px * 0.5
         }
         // name: same size on every line; a long one is condensed (to 78%), then ellipsized
         ctx.fillStyle = sc.fg
         const nameW = colW - numW - vw
         ctx.font = subFont(px)
-        const w0 = ctx.measureText(l.name).width
+        const w0 = measure(ctx, l.name)
         const k = w0 > nameW ? Math.max(0.78, nameW / w0) : 1
         const name = ellipsize(ctx, l.name, nameW / k)
         ctx.save()
         ctx.translate(cx + numW, ly)
         ctx.scale(k, 1)
-        ctx.fillText(name, 0, 0)
+        fillText(ctx, name, 0, 0)
         ctx.restore()
         // dotted leader to the value
         if (l.value) {
-          const x1 = cx + numW + ctx.measureText(name).width * k + px * 0.35
+          const x1 = cx + numW + measure(ctx, name) * k + px * 0.35
           const x2 = cx + colW - vw
           ctx.fillStyle = sc.muted
           for (let x = x1; x < x2; x += px * 0.42) ctx.fillRect(x, ly - px * 0.06, Math.max(1, px * 0.08), Math.max(1, px * 0.08))
@@ -822,7 +879,7 @@ export function drawTracklist(ctx: Ctx, x0: number, y0: number, size: number, s:
     track(ctx, u(0.3))
     ctx.font = subFont(u(18), 400)
     const nl = wrap(ctx, s.notes, W - u(120)).slice(0, 2)
-    nl.forEach((l, i) => ctx.fillText(l, m, fy + i * u(24)))
+    nl.forEach((l, i) => fillText(ctx, l, m, fy + i * u(24)))
     fy += nl.length * u(24) + u(4)
   }
   ctx.fillStyle = sc.fg
@@ -892,24 +949,24 @@ export function drawCompanySleeve(ctx: Ctx, x0: number, y0: number, size: number
   if (s.inner) {
     ctx.font = capsFont(u(18))
     track(ctx, u(4))
-    ctx.fillText('GLORY RECORDS · HOUSE PRESSING', c, u(80))
-    ctx.fillText(`${BRAND.street.toUpperCase()} · PHILADELPHIA`, c, size - u(62))
+    fillText(ctx, 'GLORY RECORDS · HOUSE PRESSING', c, u(80))
+    fillText(ctx, `${BRAND.street.toUpperCase()} · PHILADELPHIA`, c, size - u(62))
   } else {
     // GLORY + the subline fill the band above the ring text
     const top = c - ringR - u(26)
     const gpx = fit(ctx, 'GLORY', px => `400 ${px}px ${FONT.display}`, Math.min(u(150), (top - u(40)) * 0.95), u(600), u(40))
-    ctx.fillText('GLORY', c, u(34) + gpx * 0.8)
+    fillText(ctx, 'GLORY', c, u(34) + gpx * 0.8)
     track(ctx, u(5))
     ctx.font = capsFont(u(20))
-    ctx.fillText('BEER BAR & KITCHEN', c, Math.min(top, u(34) + gpx * 0.8 + u(34)))
+    fillText(ctx, 'BEER BAR & KITCHEN', c, Math.min(top, u(34) + gpx * 0.8 + u(34)))
     // the motto in a ruled box, as on the painted sign by the front windows
     const motto = mottoCaps()
     const my = Math.max(c + ringR + u(66), size - u(116))
     track(ctx, u(4))
     fit(ctx, motto, px => capsFont(px, 700), u(27), u(640), u(14))
-    const mw = ctx.measureText(motto).width
+    const mw = measure(ctx, motto)
     const bh = u(58)
-    ctx.fillText(motto, c + u(2), my + u(10))
+    fillText(ctx, motto, c + u(2), my + u(10))
     ctx.strokeStyle = ctx.fillStyle
     ctx.lineWidth = u(3)
     ctx.strokeRect(c - mw / 2 - u(30), my - bh / 2, mw + u(60), bh)
@@ -917,9 +974,9 @@ export function drawCompanySleeve(ctx: Ctx, x0: number, y0: number, size: number
     track(ctx, u(3))
     ctx.font = capsFont(u(19))
     ctx.textAlign = 'left'
-    ctx.fillText(s.rpm ?? '45 RPM', u(46), size - u(40))
+    fillText(ctx, s.rpm ?? '45 RPM', u(46), size - u(40))
     ctx.textAlign = 'right'
-    ctx.fillText('STEREO', size - u(46), size - u(40))
+    fillText(ctx, 'STEREO', size - u(46), size - u(40))
     drawRoundel(ctx, u(96), u(96), u(52))
     drawRoundel(ctx, size - u(96), u(96), u(52))
   }

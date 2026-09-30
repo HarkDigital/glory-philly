@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { assemble, brickPanelMapsAsync, houseCover, makeBarRun, prepareRoom, type PaintLine, type RoomKit } from '../../kit/room'
+import { assemble, brickPanelMapsAsync, houseCover, makeBarRun, prepareRoom, type RoomKit } from '../../kit/room'
 import {
   addBottleRow,
   addBottleSteps,
@@ -26,8 +26,10 @@ import { BRAND } from '../../content'
  * THE CELLAR's back bar — Glory's real one (Mike's photos), built from the
  * room kit's pieces in the Cellar's own order, left → right (kit metres):
  *
- *   col · AMERICAN: the exposed-brick bay with the painted "Old / 1837" and
- *   two walnut shelves of bottles (ref2), a wire-cage sconce on each column
+ *   col · AMERICAN: an exposed-brick bay, plain and sooty, with two walnut
+ *   shelves of bottles (ref2's shelves; the painted "Old 1837" is the hero's
+ *   and the other chapters' landmark, not repeated here), a wire-cage sconce
+ *   on each column
  *   · col · INTERNATIONAL: a wide walnut bay, three shelves of bottles, a
  *   shelf PACKED with LPs over them · col + sconce · LOCAL: the two bottles
  *   and the "Bottles" LP on a walnut shelf, bottles above, the hi-fi and a
@@ -96,16 +98,12 @@ export const kx = (x: number) => x * K
 export const ky = (y: number) => Y0 + y * K
 export const kz = (z: number) => Z0 + z * K
 
-/** the painted brick bay (American): its size and the paint, as at the bar (ref2) */
+/** the brick bay (American): plain old brick, sooty, no paint (the site shows "Old 1837" elsewhere) */
 const BRICK_W = BAYS.american[1] - BAYS.american[0]
 const BRICK_H = H - HEAD - CY
-const PAINT: PaintLine[] = [
-  // "1837" just over the top shelf's bottles, "Old" tucked up at its left
-  { text: 'Old', x: BRICK_W * 0.13, y: 0.25, size: 0.1, tracking: 0.02 },
-  { text: '1837', x: BRICK_W * 0.5 + 0.02, y: 0.25 + 0.3, size: 0.23, align: 'center', tracking: 0.22 },
-]
-/** "1837"'s centre (kit m) */
-export const PAINT_Y = H - HEAD - 0.55 + 0.23 / 2
+const BRICK = { lines: [], seed: 4, soot: 0.5 }
+/** the bare brick over the top shelf (kit m): the headline and the American shots frame on it */
+export const BRICK_TOP_Y = H - HEAD - 0.55 + 0.23 / 2
 
 /** where the "Bottles" LP leans on the Local shelf (kit x) */
 export const LP_KX = BAYS.local[1] - 0.2
@@ -133,7 +131,7 @@ export interface CellarBar {
 
 export async function prepareCellarBar() {
   await prepareRoom({})
-  await brickPanelMapsAsync(BRICK_W, BRICK_H, { lines: PAINT, seed: 4, soot: 0.5 })
+  await brickPanelMapsAsync(BRICK_W, BRICK_H, BRICK)
 }
 
 /** the whole back bar + the long bar, placed in world space (see K, Y0, Z0) */
@@ -179,13 +177,12 @@ export function makeCellarBar(rows: NamedRow[], mobile: boolean): CellarBar {
     }
     const rowOf = (s: NamedRow['section'], y: number) => rows.find(r => r.section === s && Math.abs(r.y - y) < 1e-3)
 
-    // ── AMERICAN: the brick bay, "Old / 1837" (ref2) ──
+    // ── AMERICAN: the brick bay over two walnut shelves (ref2) ──
     {
       const [b0, b1] = BAYS.american
       const bx = (b0 + b1) / 2
-      addBrickPanel(c, b1 - b0, BRICK_H, { x: bx, y: CY, z: WZ, lines: PAINT, seed: 4, soot: 0.5 })
+      addBrickPanel(c, b1 - b0, BRICK_H, { x: bx, y: CY, z: WZ, ...BRICK })
       A.brick = new THREE.Vector3(bx, CY + BRICK_H / 2, WZ)
-      A.paint = new THREE.Vector3(bx, PAINT_Y, WZ)
       for (let i = 0; i < 3; i++) {
         const y = SHELF_Y[i]
         if (i < 2) addShelf(c, b1 - b0, 0.22, { x: bx, y, z: WZ })
@@ -278,8 +275,8 @@ export function makeCellarBar(rows: NamedRow[], mobile: boolean): CellarBar {
   })
   kit.group.position.set(0, Y0, Z0)
   group.add(kit.group)
-  // the old brick a touch darker than the kit's default: under the Cellar's key the
-  // off-white "1837" reads as paint on brick, not a light
+  // the old brick a touch darker than the kit's default: an accent panel of sooty
+  // brick between the walnut, not a lit feature wall
   kit.group.traverse(o => {
     const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
     if (m && (o as THREE.Mesh).isMesh && m.customProgramCacheKey?.().startsWith('room-brick')) m.color.setScalar(0.72)
@@ -287,7 +284,6 @@ export function makeCellarBar(rows: NamedRow[], mobile: boolean): CellarBar {
   // softer, dimmer glints on the liquor behind the cocktails (a product shot's backdrop, not fairy lights)
   kit.materials.bottles.envMapIntensity = 0.8
   kit.materials.bottles.roughness = 0.16
-  kit.materials.spouts.roughness = 0.24
   const turntable = kit.turntable
   if (turntable) {
     turntable.setRecord(makeRecord({ label: { title: BRAND.short, paper: 'red' } }))

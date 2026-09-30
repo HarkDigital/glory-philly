@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { assemble, brickPanelMapsAsync, tapBoards, type PaintLine, type RoomKit } from '../../kit/room'
+import { assemble, brickPanelMapsAsync, tapBoards, type RoomKit } from '../../kit/room'
 import {
   addBottleRow,
   addBottleSteps,
@@ -29,16 +29,19 @@ import type { Chalkboard } from './chalk'
  * set of materials, one set of light pools, ~30 draws):
  *
  *   records bay │ col │ AMERICAN taps │ col │ INTERNATIONAL │ col │ LOCAL │ col │ the black wall
- *   liquor steps│     │ two shelves   │     │ brick panel,  │     │ one LP│ Last│ three tall chalk
- *   + packed LPs│     │ packed w/ LPs │     │ "Old 1837"    │     │ face- │ Upd.│ tap boards (DRAFTS)
- *   over mirror │     │               │     │ + bottles     │     │ out   │     │ over a glass shelf
+ *   liquor steps│     │ two shelves   │     │ bare brick    │     │ one LP│ Last│ three tall chalk
+ *   + packed LPs│     │ packed w/ LPs │     │ + a shelf of  │     │ face- │ Upd.│ tap boards (DRAFTS)
+ *   over mirror │     │               │     │ bottles       │     │ out   │     │ over a glass shelf
  *
  * Reclaimed-walnut plank cladding and boxy clad columns (a wire-cage Edison
  * sconce on each), a walnut bulkhead, the black ceiling with joists and a
  * silver flex duct, wire-cage pendants over the bar, the ebonised back
  * counter the taps stand on. Brick is ONE accent panel (the middle bay), as
- * at the bar. The long oiled bar (makeBarRun, with its black rubber rail) is
- * the chapter's own kit in front of this one.
+ * at the bar — left unpainted: the real "Old 1837" is one bay of ref1's back
+ * bar, and it already shows in the chapters whose camera looks at that bay
+ * (hero, City Wide, events), so the tap wall doesn't paint its own copy. The
+ * long oiled bar (makeBarRun, with its black rubber rail) is the chapter's own
+ * kit in front of this one.
  *
  * Units: the kit's METRES (floor y = 0, wall plane z = 0, room +z); the group
  * is scaled by S (world units per metre) and placed so the back counter's
@@ -79,18 +82,9 @@ export interface TapRoom {
   sleeve: Sleeve
 }
 
-/** "Old / 1837" painted low on the brick, just over the handles (upright serif, as the kit paints it) */
-function paintLines(w: number, h: number, tuck: number): PaintLine[] {
-  const big = Math.min(0.145, (w - 2 * tuck) * 0.19)
-  // metres from the panel's top to "1837"'s baseline: just over the handles (their tops are at ~1.55 m)
-  const base = ROOM.H - ROOM.HEAD - 1.62
-  return [
-    { text: 'Old', x: tuck + (w - 2 * tuck) * 0.12, y: base - big * 1.36, size: big * 0.42, tracking: 0.02 },
-    { text: '1837', x: w * 0.5 + big * 0.12, y: base, size: big, align: 'center', tracking: 0.22 },
-  ]
-}
-
 const TUCK = 0.05
+/** the International bay's brick: bare (no painted lettering), its own soot and bond */
+const BRICK = { lines: [], seed: 4, soot: 0.5 }
 
 function brickSize(spec: TapRoomSpec) {
   const w = (spec.brickBay[1] - spec.brickBay[0]) / spec.S + 2 * TUCK
@@ -101,7 +95,7 @@ function brickSize(spec: TapRoomSpec) {
 /** build the painted brick's maps across frames (call before makeTapRoom) */
 export async function prepareTapRoom(spec: TapRoomSpec) {
   const { w, h } = brickSize(spec)
-  await brickPanelMapsAsync(w, h, { lines: paintLines(w, h, TUCK), seed: 4, soot: 0.5 })
+  await brickPanelMapsAsync(w, h, BRICK)
 }
 
 export function makeTapRoom(spec: TapRoomSpec): TapRoom {
@@ -127,10 +121,10 @@ export function makeTapRoom(spec: TapRoomSpec): TapRoom {
     const bR = kx(spec.brickBay[1])
     addPlankWall(c, bL - TUCK - X0, H - CY + 0.05, { depth: WZ, x: (X0 + bL - TUCK) / 2, y: CY - 0.05 })
     addPlankWall(c, e0 - TUCK - (bR + TUCK), H - CY + 0.05, { depth: WZ, x: (bR + TUCK + e0 - TUCK) / 2, y: CY - 0.05 })
-    // the brick bay: "Old 1837" low over the International taps
+    // the brick bay behind the International taps (bare brick: the accent, not the landmark)
     {
       const { w: bw, h: bh } = brickSize(spec)
-      addBrickPanel(c, bw, bh, { x: (bL + bR) / 2, y: CY - 0.05, z: 0, lines: paintLines(bw, bh, TUCK), seed: 4, soot: 0.5 })
+      addBrickPanel(c, bw, bh, { x: (bL + bR) / 2, y: CY - 0.05, z: 0, ...BRICK })
       // a walnut shelf of bottles (with pour spouts) up over the paint, as in ref2
       const sy = 2.34
       addShelf(c, bR - bL, 0.22, { x: (bL + bR) / 2, y: sy, z: 0 })

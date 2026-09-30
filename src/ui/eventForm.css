@@ -250,6 +250,21 @@
 .gef .gef-date::-webkit-calendar-picker-indicator:hover {
   opacity: 1;
 }
+/* Chrome gives the calendar button its own Tab stop; the field itself is then not
+   :focus-visible, so ring the whole field while any part of it has focus, and mark
+   the button in the same ink (never the UA's thin blue box). Chrome ignores :focus on
+   the indicator itself: the field is :focus-within but not :focus while it has focus */
+.gef .gef-date:focus-within {
+  outline: 2px solid var(--gef-ring);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--gef-halo);
+}
+.gef .gef-date:focus-within:not(:focus)::-webkit-calendar-picker-indicator {
+  opacity: 1;
+  outline: 2px solid var(--gef-ring);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
 /* an inline error: a small red disc, then the message */
 .gef .gef-err {
   display: flex;
@@ -737,6 +752,34 @@
     font-size: 13px;
   }
 }
+/* shorter still (1366 x 657 laptops, 200% zoom of a tall window): tighter rhythm and
+   a shorter summary box (it grows with resize), so the card needs no inner scroll */
+@media (max-height: 690px) and (min-width: 560px) {
+  .gef {
+    --gef-pad: 20px;
+  }
+  .gef .gef-grid {
+    gap: 10px 14px;
+    margin-top: 12px;
+  }
+  .gef .gef-text {
+    height: 56px;
+    min-height: 48px;
+  }
+  .gef .gef-actions {
+    margin-top: 12px;
+  }
+  .gef .gef-via {
+    font-size: 12.5px;
+    line-height: 1.38;
+  }
+  .gef .gef-large {
+    margin-top: 12px;
+    padding-top: 9px;
+    font-size: 12.5px;
+    line-height: 1.42;
+  }
+}
 /* small phones (375 x 667): everything still fits between the chrome bands */
 @media (max-width: 559px) and (max-height: 720px) {
   .gef {
@@ -969,8 +1012,11 @@
   pointer-events: none;
   white-space: normal;
   opacity: var(--gef-v);
-  transform: translate3d(0, calc((1 - var(--gef-v)) * 18px), 0) rotate(calc((1 - var(--gef-v)) * -1.2deg));
-  transform-origin: 70% 60%;
+  /* the settle: the card grows its last 3% into place about the dock's centre. Scaling
+     down only ever shrinks it inside its own box (top/bottom = the chrome bands), so
+     coming in or fading out it never slides or tilts into the chrome */
+  transform: scale(calc(0.97 + 0.03 * var(--gef-v)));
+  transform-origin: 50% 50%;
   transition:
     opacity 0.18s ease,
     transform 0.28s cubic-bezier(0.2, 0.8, 0.3, 1);

@@ -106,6 +106,18 @@ interface Pose {
 
 const mkPose = (): Pose => ({ pos: new THREE.Vector3(), tgt: new THREE.Vector3(), lamps: [0, 0, 0] })
 
+/**
+ * The portrait covers' canvas size. A sleeve never spans more than about half
+ * the screen's long side (the close shots put its liner notes beside or below
+ * it), and touch devices render at DPR ≤ 1.5, so a phone gets 640² (a third
+ * of 1024²'s memory) and only a large tablet the full 1024². Desktop: 1024².
+ */
+function coverRes(mobile: boolean) {
+  if (!mobile) return 1024
+  const long = Math.max(innerWidth, innerHeight, screen?.width ?? 0, screen?.height ?? 0)
+  return Math.min(1024, Math.max(512, Math.ceil((long * 0.5 * 1.5) / 128) * 128))
+}
+
 export default function create(): Chapter {
   const group = new THREE.Group()
   const clock = new StoryClock({ rate: 0.12 })
@@ -330,8 +342,8 @@ export default function create(): Chapter {
     const [d0] = displays
     const colFront = ROOM.colD * m
     // THE WALL, above the headline. Desktop / landscape: straight on (a hair
-    // from below: the flex duct and the pendants hang in along the top), the
-    // three columns with their sleeves and sconces, the packed bays between.
+    // from below: the pendants hang in along the top from the dark overhead),
+    // the three columns with their sleeves and sconces, the packed bays between.
     // Portrait: a three-quarter view down the wall from the left, Dave's
     // display near and large, the bays and Kevin's column running on beyond.
     const y1 = Math.max(safeTop + 120, L.headTop - 18)
@@ -508,9 +520,10 @@ export default function create(): Chapter {
       buildDom(ctx.stage)
 
       // the portraits' covers + labels, the Archibald 7"
+      const res = coverRes(ctx.mobile)
       const specs = PEOPLE.map((p, i) => {
         // (the ledge's steel lip covers the foot of the sleeve: the band's name is set above it)
-        const cover = portraitCover({ title: p.name, kicker: p.role, cat: catNo(51 + i), paper: 'cream', focus: FOCUS[p.id] ?? [0.5, 0.2] }, p.photo, 1024, 0.052)
+        const cover = portraitCover({ title: p.name, kicker: p.role, cat: catNo(51 + i), paper: 'cream', focus: FOCUS[p.id] ?? [0.5, 0.2] }, p.photo, res, 0.052)
         covers.push(cover)
         const label = labelTexture({ title: p.name, sub: p.role, side: 'SIDE A', cat: catNo(51 + i), paper: LABEL_PAPER[i] })
         return { front: cover.texture, label, seed: i }

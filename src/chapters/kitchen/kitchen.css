@@ -30,8 +30,7 @@
 
 .kt-intro,
 .kt-panel,
-.kt-end,
-.kt-cap {
+.kt-end {
   opacity: 0;
   visibility: hidden;
   transform: translate3d(0, 12px, 0);
@@ -42,8 +41,7 @@
 }
 .kt-intro.is-on,
 .kt-panel.is-on,
-.kt-end.is-on,
-.kt-cap.is-on {
+.kt-end.is-on {
   opacity: 1;
   visibility: visible;
   transform: none;
@@ -73,6 +71,21 @@
 .kt-title {
   font-size: clamp(2.6rem, 5.4vw, 5.6rem);
   text-shadow: 0 2px 30px rgba(0, 0, 0, 0.5);
+}
+/* the 11px eyebrow sits where the headline's scrim fades out (over the lit LP
+   spines on the shelf): it carries its own soft stout pool (small text ≥ 4.5:1) */
+.kt-intro .hud-eyebrow {
+  position: relative;
+  isolation: isolate;
+  align-self: flex-start;
+}
+.kt-intro .hud-eyebrow::after {
+  content: '';
+  position: absolute;
+  inset: -26px -58px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(10, 6, 4, 0.74), rgba(10, 6, 4, 0.62) 46%, rgba(10, 6, 4, 0.26) 74%, rgba(10, 6, 4, 0));
 }
 
 /* ---- the menu panel: one section at a time, all items readable at rest */
@@ -109,8 +122,7 @@
     opacity 0.35s ease 0.08s,
     visibility 0s;
 }
-.kt-sec.kt-flip .kt-items,
-.kt-cap.kt-flip .kt-cap-row {
+.kt-sec.kt-flip .kt-items {
   animation: kt-in 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 @keyframes kt-in {
@@ -167,6 +179,29 @@
   grid-template-columns: 1fr 1fr;
   gap: 14px 28px;
 }
+/* the row of the dish in hand, marked like the track that's playing (no caption card) */
+.kt-item {
+  position: relative;
+}
+.kt-item::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--glory-lit);
+  opacity: 0;
+  transform: scaleY(0.3);
+  transition:
+    opacity 0.25s ease,
+    transform 0.45s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.kt-item.is-on::before {
+  opacity: 1;
+  transform: none;
+}
 .kt-row {
   display: flex;
   align-items: baseline;
@@ -217,45 +252,6 @@
   color: var(--fg-muted);
 }
 
-/* ---- the caption under the print on the pass */
-.kt-cap {
-  position: absolute;
-  left: var(--gutter);
-  bottom: var(--safe-bottom);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 16px 11px;
-  border-radius: 6px;
-  background: rgba(16, 10, 7, 0.82);
-  border: 1px solid var(--line);
-  max-width: calc(100vw - 2 * var(--gutter));
-}
-.kt-cap-label {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--fg-muted);
-}
-.kt-cap-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.kt-cap-name {
-  font-family: var(--font-display);
-  font-size: 21px;
-  line-height: 1.1;
-  color: var(--fg);
-}
-.kt-cap-price {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  font-size: 15px;
-  color: var(--amber-hot);
-}
-
 /* ---- last beat: order + kitchen hours */
 .kt-end {
   display: flex;
@@ -302,9 +298,6 @@
     align-self: start;
     padding-top: 6px;
   }
-  .kt-cap {
-    bottom: calc(50% + 8px);
-  }
   .kt-end {
     align-self: start;
   }
@@ -336,12 +329,6 @@
     font-size: 15px;
     margin-top: 4px;
   }
-  .kt-cap {
-    padding: 7px 12px 8px;
-  }
-  .kt-cap-name {
-    font-size: 18px;
-  }
   .kt-end {
     padding: 18px;
   }
@@ -351,9 +338,6 @@
 @media (max-aspect-ratio: 1/1) and (max-height: 720px) {
   .kt-dock {
     top: 44%;
-  }
-  .kt-cap {
-    bottom: calc(56% + 6px);
   }
   .kt-kicker {
     display: none;
@@ -399,13 +383,6 @@
   }
   .kt-title {
     font-size: 2.4rem;
-  }
-  .kt-cap {
-    padding: 6px 12px 7px;
-    gap: 2px;
-  }
-  .kt-cap-name {
-    font-size: 16px;
   }
   .kt-end {
     padding: 14px 18px;

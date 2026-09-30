@@ -38,7 +38,8 @@ import { leanAgainst, makeRecord, makeSleeve, planeClearance, SEVEN, type Record
  *            Glorious Archibald face-out in front of them; bottles up top
  *   bay R    an exposed-brick accent panel with two walnut shelves: the stout
  *            stands on the lower one (the out-beat cranes down to it)
- *   above    the black ceiling, silver flex duct, two wire-cage pendants
+ *   above    the black ceiling and joists, two wire-cage pendants in front of
+ *            the wall, the silver flex duct overhead out over the aisle
  *
  * Every sleeve is posed by kit/vinyl's leanAgainst from its real bounds (the
  * record half out counts): the top edge keeps ~4 mm off the column (or the
@@ -87,6 +88,8 @@ export const ROOM = {
 const L = ROOM
 /** the stout's x on bay R's lower shelf (from the bay's left edge, metres) */
 const PINT_AT = 0.44
+/** the flex duct's radius (metres; addDuct bulges it up to ~7% between straps) */
+const DUCT_R = 0.19
 /** record half out of its sleeve (display-local, sleeve units): resting .. in focus */
 export const OUT: [number, number] = [0.57, 0.66]
 
@@ -180,13 +183,16 @@ export async function makeCrewWall(people: DisplaySpec[], single: DisplaySpec, m
     for (let x = X0 + 0.3; x < X1; x += 1.2) box(c, c.M.ceiling, 0.1, 0.2, 5, x, L.ceil - 0.1, 2.5)
     addCounter(c, X0, X1, { y: L.cy, d: 0.6 })
     wood(c, X1 - X0, L.cy - 0.045, 0.58, (X0 + X1) / 2, (L.cy - 0.045) / 2, 0.29, { vertical: true, tile: 1.6 })
-    // the ceiling's silver flex duct and two wire-cage pendants in front of the wall
-    // (it runs just in front of the columns — 5 cm clear of their faces, 8 cm over the
-    // sconces' cages — and behind the pendants, low enough that the wide shot catches it
-    // along the top, as in ref1; the close shots stay under it)
-    addDuct(c, [new THREE.Vector3(X0, L.ceil - 0.77, 0.72), new THREE.Vector3((c0 + c1) / 2, L.ceil - 0.8, 0.7), new THREE.Vector3(X1, L.ceil - 0.77, 0.71)], {
-      radius: 0.19,
-      ceilingY: L.ceil - 0.2,
+    // the ceiling's silver flex duct, as in ref1/ref6: OVERHEAD, out over the aisle
+    // (~1.7 m off the wall, in front of the pendants at z 1.2), hung tight under the
+    // black joists (their undersides at ceil − 0.2) on rods to the ceiling. It is not
+    // a rail along the face of the wall: like ref4, this chapter's frames stop below
+    // the ceiling line, so it stays overhead (out of shot) and the pendants hang in
+    // along the top of the wide shot from the dark above
+    const DY = L.ceil - 0.2 - DUCT_R * 1.07 - 0.04
+    addDuct(c, [new THREE.Vector3(X0, DY, 1.74), new THREE.Vector3((c0 + c1) / 2, DY - 0.015, 1.68), new THREE.Vector3(X1, DY, 1.72)], {
+      radius: DUCT_R,
+      ceilingY: L.ceil,
     })
 
     // the three portrait columns: walnut, a steel ledge, a sconce

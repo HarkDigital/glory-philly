@@ -9,7 +9,8 @@ import { COCKTAILS } from '../../content'
  *  0.175–0.345  BOTTLES · International: three shelves, snaking (one page of
  *               names per shelf on phones; all 42 in three columns on desktop,
  *               the column of the shelf in frame lit)
- *  0.345–0.390  BOTTLES · Local: a macro on the two Ploughman bottles
+ *  0.345–0.390  BOTTLES · Local: a cut with the card onto the whole Local bay,
+ *               in to a macro on the two Ploughman bottles, out to the LP
  *  0.390–0.490  WINE: the stainless wine tower pours red, white and rosé
  *  0.490–0.945  COCKTAILS: seven product shots sliding down the bar
  *  0.945–1.000  push in on the last glass; the ruby pour cut

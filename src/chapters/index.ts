@@ -1,4 +1,5 @@
 import type { ChapterDef } from '../core/types'
+import { CITY_WIDE } from '../content'
 
 /**
  * The scroll story, in order. `length` is scroll distance in viewport
@@ -24,7 +25,7 @@ export const CHAPTERS: ChapterDef[] = [
   { id: 'hero', label: 'This Must Be the Place', length: 2.4, landing: 0, intro: 0, load: () =>
       LAB === 'vinyl' ? import('./lab-vinyl') : LAB === 'room' ? import('./lab-room') : LAB === 'citywide' ? import('./lab-citywide') : import('./hero/index') },
   { id: 'taps', label: 'On Tap', length: 5.6, landing: 0.07, intro: 0.07, load: () => import('./taps/index') },
-  { id: 'citywide', label: 'City Wide', length: 3.0, landing: 0.1, intro: 0.1, load: () => import('./citywide/index') },
+  { id: 'citywide', label: CITY_WIDE.title, length: 3.0, landing: 0.1, intro: 0.1, load: () => import('./citywide/index') },
   { id: 'kitchen', label: 'The Kitchen', length: 9.6, landing: 0.07, intro: 0.07, load: () => import('./kitchen/index') },
   { id: 'cellar', label: 'The Cellar', length: 8.2, landing: 0.07, intro: 0.07, load: () => import('./cellar/index') },
   { id: 'people', label: 'The Crew', length: 3.8, landing: 0.07, intro: 0.07, load: () => import('./people/index') },

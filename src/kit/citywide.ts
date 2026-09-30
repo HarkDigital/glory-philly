@@ -16,7 +16,7 @@ import { makePourStream } from './beer'
  *    in Hamm's classic livery (royal blue, the white crown band with gold
  *    pines in the blue arches, the red serif wordmark, BEER, the white script
  *    lines — all drawn on canvas, no logo files), clear-varnished; the gold
- *    lid, the pull tab and the mouth open with setOpen(0..1).
+ *    lid, the plain aluminium pull tab and the mouth open with setOpen(0..1).
  *  - a heavy-based shot glass: a solid 0.55" base, ten pressed flutes with
  *    rounded tops, a slight flare, a rolled rim. The glass is a clear
  *    NON-transmissive shell (reflections only) over the TRANSMISSIVE rye
@@ -65,10 +65,15 @@ import { makePourStream } from './beer'
  * meniscus and the lid read in any chapter's light; shot.setRoom(k) tones it.
  *
  * PERFORMANCE: one transmissive mesh (the rye). The can is opaque (label
- * 2048×1024 canvas + a small PBR map; pass labelRes: 1024 on phones), the
- * glass is one premultiplied draw, the bottle's whiskey is a cheap
- * non-transmissive stand-in. Everything is readable from any value you pass
- * (no state accumulates); update(frame) only drives idle shimmer.
+ * 2048×1024 canvas + a small PBR map; pass labelRes: 1024 on phones), each
+ * glass shell is two single-pass premultiplied draws of lean geometry (far
+ * wall, then near wall; ~9k tris each for the shot glass, ~18k for the
+ * bottle, whose shoulder keeps its rows for the strips; see glassShell and
+ * leanProfile), the bottle's whiskey is a cheap non-transmissive stand-in.
+ * Every art canvas is freed (1×1) once its final pixels are on the GPU: art
+ * textures freeze then — make a new piece to change them. Everything is
+ * readable from any value you pass (no state accumulates); update(frame)
+ * only drives idle shimmer.
  */
 
 /** one inch in kit units (kit/beer's scale: a pint glass is 1.12 tall) */
@@ -91,10 +96,32 @@ function makeCanvas(w: number, h: number) {
   c.height = h
   return c
 }
-function canvasTex(c: HTMLCanvasElement, srgb = true) {
+/**
+ * A canvas texture whose canvas is freed once the GPU has its final pixels: when `settled` resolves
+ * (after the canvas's last redraw — post-fonts for text; at once for static art), the next upload
+ * (or the one already done) shrinks the canvas to 1×1. three keeps the uploaded texture, so never
+ * set needsUpdate after `settled`: redraw into a new texture instead.
+ */
+function canvasTex(c: HTMLCanvasElement, srgb = true, settled: Promise<unknown> = Promise.resolve()) {
   const t = new THREE.CanvasTexture(c)
   t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace
   t.anisotropy = 8
+  let armed = false
+  let uploaded = -1
+  const free = () => {
+    t.onUpdate = null
+    c.width = 1
+    c.height = 1
+  }
+  t.onUpdate = () => {
+    uploaded = t.version
+    if (armed) free()
+  }
+  const arm = () => {
+    armed = true
+    if (uploaded === t.version) free()
+  }
+  void settled.then(arm, arm)
   return t
 }
 
@@ -108,8 +135,119 @@ function profile(pts: [number, number][], n: number): THREE.Vector2[] {
   return c.getSpacedPoints(n).map(p => new THREE.Vector2(Math.max(0, p.x) * IN, p.y * IN))
 }
 
+/**
+ * Thin a profile polyline, returning the kept indices (Ramer–Douglas–Peucker; the ends stay): a
+ * span is split while a point strays more than `tol` from its chord, or while its tangent swings
+ * more than `turn` radians anywhere inside it and it is longer than `minLen` — sharp studio strips
+ * on a curved shoulder need its normals, not just its outline.
+ */
+function thinIdx(pts: THREE.Vector2[], tol: number, turn = Math.PI, minLen = 0): number[] {
+  if (pts.length < 3) return pts.map((_, i) => i)
+  const keep = new Uint8Array(pts.length)
+  keep[0] = keep[pts.length - 1] = 1
+  const dir = (i: number) => Math.atan2(pts[i + 1].y - pts[i].y, pts[i + 1].x - pts[i].x)
+  const stack: [number, number][] = [[0, pts.length - 1]]
+  while (stack.length) {
+    const [a, b] = stack.pop()!
+    if (b - a < 2) continue
+    const A = pts[a]
+    const dx = pts[b].x - A.x
+    const dy = pts[b].y - A.y
+    const L = Math.hypot(dx, dy) || 1e-12
+    let far = -1
+    let fi = -1
+    for (let i = a + 1; i < b; i++) {
+      const d = Math.abs((pts[i].x - A.x) * dy - (pts[i].y - A.y) * dx) / L
+      if (d > far) {
+        far = d
+        fi = i
+      }
+    }
+    // how far the tangent swings anywhere inside the span (a shoulder can bend out and back)
+    let cum = 0
+    let lo = 0
+    let hi = 0
+    for (let i = a + 1; i < b; i++) {
+      let d = dir(i) - dir(i - 1)
+      if (d > Math.PI) d -= 2 * Math.PI
+      else if (d < -Math.PI) d += 2 * Math.PI
+      cum += d
+      lo = Math.min(lo, cum)
+      hi = Math.max(hi, cum)
+    }
+    if (far > tol || (hi - lo > turn && L > minLen)) {
+      if (far <= tol) fi = (a + b) >> 1
+      keep[fi] = 1
+      stack.push([a, fi], [fi, b])
+    }
+  }
+  const out: number[] = []
+  keep.forEach((k, i) => k && out.push(i))
+  return out
+}
+
+/** a thinned profile with its TRUE normals (null: let the lathe work it out) */
+interface Lean {
+  pts: THREE.Vector2[]
+  nor: (THREE.Vector2 | null)[]
+}
+
+/**
+ * Thin a dense profile polyline (units; tol, minLen in inches; turn in degrees) and keep each kept
+ * point's normal from its dense neighbours. LatheGeometry weights its vertex normals by the
+ * lengths of the two chords either side, so on a thinned profile a long straight run would drag
+ * the first normals of the curve beside it; the dense normals don't.
+ */
+function lean(dense: THREE.Vector2[], tol: number, turnDeg = 4, minLen = 0.04): Lean {
+  const idx = thinIdx(dense, tol * IN, (turnDeg * Math.PI) / 180, minLen * IN)
+  const last = dense.length - 1
+  return {
+    pts: idx.map(i => dense[i]),
+    nor: idx.map(i => {
+      const a = dense[Math.max(0, i - 1)]
+      const b = dense[Math.min(last, i + 1)]
+      return new THREE.Vector2(b.y - a.y, a.x - b.x).normalize()
+    }),
+  }
+}
+
+/** a lean lathe profile: the rims and shoulders keep their rows, straight walls and floors lose theirs */
+function leanProfile(pts: [number, number][], tol: number, turnDeg = 4, minLen = 0.04): Lean {
+  return lean(profile(pts, 480), tol, turnDeg, minLen)
+}
+
+/**
+ * LatheGeometry over one or more lean pieces joined end to end: each piece's interior points get
+ * their true normals (the ends, and nulls, keep the lathe's own, as the joins always had).
+ */
+function latheLean(pieces: Lean[], segments: number, phiStart = 0): THREE.LatheGeometry {
+  const pts = pieces.flatMap(p => p.pts)
+  const geo = new THREE.LatheGeometry(pts, segments, phiStart)
+  const nor = geo.attributes.normal as THREE.BufferAttribute
+  const P = pts.length
+  let j0 = 0
+  for (const piece of pieces) {
+    for (let j = 1; j < piece.pts.length - 1; j++) {
+      const n = piece.nor[j]
+      if (!n) continue
+      for (let i = 0; i <= segments; i++) {
+        const phi = phiStart + (i / segments) * TAU
+        nor.setXYZ(i * P + j0 + j, n.x * Math.sin(phi), n.y, n.x * Math.cos(phi))
+      }
+    }
+    j0 += piece.pts.length
+  }
+  return geo
+}
+
 const SANS = '"Inter Tight Variable", "Inter Tight", system-ui, sans-serif'
 const SERIF = 'Georgia, "Times New Roman", Times, serif'
+/**
+ * The can's two slogans ("The beer…refreshing!", "From the land of sky blue waters*") are set in
+ * italic on the real can (ref3) — product livery, not a heading, and not Instrument Serif. Pending
+ * Mike's OK on that (his rule bans italic serif titles): '' sets them upright at the same size.
+ */
+const SLOGAN = 'italic '
 
 let fontsReady: Promise<void> | null = null
 function whenFonts(): Promise<void> {
@@ -117,7 +255,7 @@ function whenFonts(): Promise<void> {
   const f = document.fonts
   if (!f?.load) return (fontsReady = Promise.resolve())
   fontsReady = Promise.race([
-    Promise.all([f.load(`800 40px ${SANS}`), f.load(`700 40px ${SERIF}`), f.load(`italic 700 40px ${SERIF}`)]).then(() => undefined),
+    Promise.all([f.load(`800 40px ${SANS}`), f.load(`700 40px ${SERIF}`), f.load(`${SLOGAN}700 40px ${SERIF}`)]).then(() => undefined),
     new Promise<void>(r => setTimeout(r, 4000)),
   ]).catch(() => undefined)
   return fontsReady
@@ -187,6 +325,9 @@ function withRoom<T extends THREE.MeshStandardMaterial>(mat: T, key: string, k =
  * refraction band inside the silhouette. `floor` = the local height (units)
  * below which the glass is solid (a heavy base): it shows more, and carries
  * the liquid's glow down it.
+ *
+ * Two materials sharing the uniforms: `back` draws the far wall (back faces),
+ * then `front` the near wall — see glassShell().
  */
 function clearGlass(floor: number, { tint = 0.06, edge = 0.55, solid = 0.2, facets = false } = {}) {
   const u = {
@@ -198,8 +339,39 @@ function clearGlass(floor: number, { tint = 0.06, edge = 0.55, solid = 0.2, face
     uGlowC: { value: new THREE.Color(0, 0, 0) },
     uRoom: { value: 1 },
   }
+  const make = (side: THREE.Side) => shellMat(side, u, facets)
+  return { front: make(THREE.FrontSide), back: make(THREE.BackSide), u }
+}
+
+/**
+ * A glass shell as two single-pass meshes on one geometry: the far wall (back faces) under
+ * the near wall (front faces). That is the order three's DoubleSide transparency gives,
+ * without its cost: it draws one mesh twice and flips material.side with needsUpdate
+ * around each draw, re-resolving the program every frame. `mesh` is the near wall; the
+ * far wall rides on it as a child. The pair sorts as ONE object among the other
+ * transparents (same renderOrder, same depth): three's stable sort then breaks the tie
+ * by id, and the far wall is made first.
+ */
+function glassShell(geo: THREE.BufferGeometry, floor: number, opts: Parameters<typeof clearGlass>[1]) {
+  const { front, back, u } = clearGlass(floor, opts)
+  const far = new THREE.Mesh(geo, back)
+  const mesh = new THREE.Mesh(geo, front)
+  mesh.renderOrder = far.renderOrder = 2
+  mesh.castShadow = far.castShadow = false
+  mesh.add(far)
+  return {
+    mesh,
+    u,
+    dispose() {
+      front.dispose()
+      back.dispose()
+    },
+  }
+}
+
+function shellMat(side: THREE.Side, u: Record<string, THREE.IUniform>, facets: boolean) {
   const mat = new THREE.MeshPhysicalMaterial({
-    side: THREE.DoubleSide,
+    side,
     color: 0x000000,
     metalness: 0,
     roughness: 0.03,
@@ -233,7 +405,8 @@ function clearGlass(floor: number, { tint = 0.06, edge = 0.55, solid = 0.2, face
         `#include <opaque_fragment>
         {
           vec3 vn = normalize(normal);
-          float nv = abs(dot(vn, normalize(vViewPosition)));
+          // |dot| of two normalized vectors can land a hair over 1: pow(1 - nv) of a negative is NaN
+          float nv = min(abs(dot(vn, normalize(vViewPosition))), 1.0);
           float fr = 1.0 - nv;
           fr = fr * fr * fr;
           // the far wall's surfaces, seen through the near one, show less
@@ -262,7 +435,7 @@ function clearGlass(floor: number, { tint = 0.06, edge = 0.55, solid = 0.2, face
       )
   }
   mat.customProgramCacheKey = () => (facets ? 'cw-glass-f' : 'cw-glass')
-  return { mat, u }
+  return mat
 }
 
 // ═══ THE CAN ════════════════════════════════════════════════════════════════
@@ -403,7 +576,7 @@ function drawHamms(g: CanvasRenderingContext2D, W: number, H: number, ink: Label
     g.save()
     g.translate(cx, yAt(3.74))
     g.rotate(-0.075)
-    g.font = `italic 700 ${Math.round(66 * s)}px ${SERIF}`
+    g.font = `${SLOGAN}700 ${Math.round(66 * s)}px ${SERIF}`
     g.textAlign = 'center'
     g.textBaseline = 'alphabetic'
     fitText(g, 'The beer…refreshing!', 0, 0, 2.3 * ph)
@@ -439,7 +612,7 @@ function drawHamms(g: CanvasRenderingContext2D, W: number, H: number, ink: Label
 
     // "From the land of / sky blue waters*" — white serif italic
     g.fillStyle = ink.script
-    g.font = `italic 700 ${Math.round(46 * s)}px ${SERIF}`
+    g.font = `${SLOGAN}700 ${Math.round(46 * s)}px ${SERIF}`
     fitText(g, 'From the land of', cx, yAt(0.8), 1.7 * ph)
     fitText(g, 'sky blue waters*', cx, yAt(0.57), 1.7 * ph)
   }
@@ -451,8 +624,11 @@ function labelTextures(res: number) {
   const H = res / 2
   const cv = makeCanvas(W, H)
   const rm = makeCanvas(W / 2, H / 2)
-  const map = canvasTex(cv)
-  const rmTex = canvasTex(rm, false)
+  // the canvases are freed once the post-fonts art is on the GPU
+  let settle!: () => void
+  const settled = new Promise<void>(r => (settle = r))
+  const map = canvasTex(cv, true, settled)
+  const rmTex = canvasTex(rm, false, settled)
   const draw = () => {
     drawHamms(cv.getContext('2d')!, W, H, INK_COLOR)
     drawHamms(rm.getContext('2d')!, W / 2, H / 2, INK_RM)
@@ -460,8 +636,9 @@ function labelTextures(res: number) {
     rmTex.needsUpdate = true
   }
   draw()
-  void whenFonts().then(draw)
-  document.fonts?.ready?.then(draw).catch(() => undefined)
+  void Promise.all([whenFonts().then(draw), document.fonts?.ready?.then(draw)])
+    .catch(() => undefined)
+    .finally(settle)
   return { map, rm: rmTex }
 }
 
@@ -517,11 +694,26 @@ function lidBump(): THREE.CanvasTexture {
   const cv = makeCanvas(N, N)
   const g = cv.getContext('2d')!
   const R = CAN.panelR
+  const S = N / (2 * R) // px per inch
   g.fillStyle = '#808080'
   g.fillRect(0, 0, N, N)
   g.save()
   g.translate(N / 2, N / 2)
-  g.scale(N / (2 * R), N / (2 * R))
+  g.scale(S, S)
+  // a soft (Gaussian) paint without ctx.filter, which Safari before 18 ignores (hard edges): the
+  // shape is drawn two canvas-widths off to the left and only its shadow lands, back in place.
+  // Shadow offset and blur are in canvas px whatever the transform; σ = shadowBlur / 2.
+  const soft = (sigmaPx: number, color: string, paint: () => void) => {
+    const off = 2 * N
+    g.save()
+    g.fillStyle = g.strokeStyle = '#000'
+    g.shadowColor = color
+    g.shadowBlur = 2 * sigmaPx
+    g.shadowOffsetX = off
+    g.translate(-off / S, 0)
+    paint()
+    g.restore()
+  }
   // concentric spin marks (the lid is spun: faint rings)
   const r = rng(5)
   for (let i = 0; i < 90; i++) {
@@ -550,12 +742,11 @@ function lidBump(): THREE.CanvasTexture {
     })
     g.closePath()
   }
-  g.filter = 'blur(2px)'
-  g.strokeStyle = 'rgba(255,255,255,0.7)'
-  g.lineWidth = 0.05
-  path(1.16, 0.01)
-  g.stroke()
-  g.filter = 'none'
+  soft(2, 'rgba(255,255,255,0.7)', () => {
+    g.lineWidth = 0.05
+    path(1.16, 0.01)
+    g.stroke()
+  })
   g.strokeStyle = 'rgba(0,0,0,0.85)'
   g.lineWidth = 0.014
   path(1.0, 0)
@@ -570,12 +761,11 @@ function lidBump(): THREE.CanvasTexture {
   g.beginPath()
   g.arc(0, 0, 0.13, 0, TAU)
   g.stroke()
-  g.filter = 'blur(6px)'
-  g.fillStyle = 'rgba(0,0,0,0.5)'
-  g.beginPath()
-  g.ellipse(0, -0.62, 0.22, 0.12, 0, 0, TAU)
-  g.fill()
-  g.filter = 'none'
+  soft(6, 'rgba(0,0,0,0.5)', () => {
+    g.beginPath()
+    g.ellipse(0, -0.62, 0.22, 0.12, 0, 0, TAU)
+    g.fill()
+  })
   g.restore()
   return canvasTex(cv, false)
 }
@@ -755,7 +945,9 @@ export function makeCan({
   beerTop.position.y = 3.86 * IN
   lid.add(inside, beerTop)
 
-  const tabMat = withRoom(new THREE.MeshPhysicalMaterial({ color: '#ddd3b8', metalness: 1, roughness: 0.24 }), 'tab', 1)
+  // the tab is plain aluminium (ref3: silver beside the gold lid, in the same light); the bar's warm
+  // light gives it its cast
+  const tabMat = withRoom(new THREE.MeshPhysicalMaterial({ color: '#c9cdd0', metalness: 1, roughness: 0.25 }), 'tab', 1)
   const tabGeo = tabGeometry()
   const tab = new THREE.Group()
   tab.position.set(0, CAN.panelY * IN + 0.004 * IN, 0)
@@ -815,18 +1007,43 @@ const SG_INNER: [number, number][] = [
   [1.035, 1.99], [1.0, 1.575], [0.965, 1.16], [0.93, 0.75], [0.915, 0.665], [0.878, 0.595], [0.8, 0.558], [0.5, 0.55], [0, 0.55],
 ]
 
-/** the faceted outside: each flute is a plane cutting the flared round (arched tops fall out of the cut) */
+/** radial columns per flute: the outside and the inside lathe share the same N·M angles (no cracks at the rim) */
+const SG_M = 10
+
+/**
+ * The faceted outside: each flute is a plane cutting the flared round (arched tops fall out of the
+ * cut). Rows follow the arch: per column, the flute meets the round where R − rf = 0 (y* ≈ 0.82" at
+ * a flute's edges, 0.96" at its middle), and a row sits on that crease with three either side at
+ * fixed R − rf levels (where the normal blends), so the arch is one clean curve on every column.
+ * Below it the flute is flat and above it the round is a cone, so a few rows carry the rest.
+ */
 function facetedOuter(): THREE.BufferGeometry {
   const N = SG.N
-  const M = 20
-  // rows: fine at the chamfer and through the arched flute tops (no stair-steps)
-  const ys: number[] = []
-  for (let y = 0; y < SG.rimY - 1e-6; ) {
-    ys.push(y)
-    y += y < 0.06 ? 0.01 : y > 0.72 && y < 1.02 ? 0.006 : 0.03
+  const M = SG_M
+  // R − rf at height y on a column cd = cos(θ − φ) (above the chamfer): decreasing from 0.7" up
+  const gap = (y: number, cd: number) => sgR(y) - sgA(y) / cd
+  const at = (level: number, cd: number) => {
+    let lo = 0.7
+    let hi = SG.rimY
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2
+      if (gap(mid, cd) > level) lo = mid
+      else hi = mid
+    }
+    return (lo + hi) / 2
   }
-  ys.push(SG.rimY)
-  const rows = ys.length
+  const LEVELS = [0.012, 0.006, 0.003, 0, -0.003, -0.006, -0.012]
+  const column = (cd: number) => {
+    const ys = [0, 0.017, 0.034, 0.05, 0.7]
+    const y0 = at(LEVELS[0], cd)
+    for (const f of [0.35, 0.65, 0.85]) ys.push(0.7 + (y0 - 0.7) * f)
+    for (const l of LEVELS) ys.push(at(l, cd))
+    ys.push(SG.rimY)
+    // strictly rising (the edge columns start their arch just above 0.7")
+    for (let j = 1; j < ys.length; j++) ys[j] = Math.max(ys[j], ys[j - 1] + 1e-4)
+    return ys
+  }
+  const rows = column(1).length
   const cols = N * (M + 1)
   const pos = new Float32Array(cols * rows * 3)
   const nor = new Float32Array(cols * rows * 3)
@@ -842,6 +1059,7 @@ function facetedOuter(): THREE.BufferGeometry {
       const st = Math.sin(th)
       const ct = Math.cos(th)
       const cd = Math.cos(th - phi)
+      const ys = column(cd)
       for (let j = 0; j < rows; j++) {
         const y = ys[j]
         const ch = sgCham(y)
@@ -1051,21 +1269,21 @@ export interface ShotGlass {
 
 export function makeShotGlass({ fill = 0.55, glow = 0.3 }: { fill?: number; glow?: number } = {}): ShotGlass {
   const group = new THREE.Group()
-  const inner = profile(SG_INNER, 120)
-  const lathe = new THREE.LatheGeometry(inner, 120)
+  // the inside: the rolled rim and the bowl's foot keep their points, the straight wall and the
+  // floor don't; on the outside's N·M angles, so the two meet exactly at the rim
+  const lathe = latheLean([leanProfile(SG_INNER, 0.001)], SG.N * SG_M, -Math.PI / SG.N)
   lathe.deleteAttribute('uv')
   lathe.setAttribute('aFacet', new THREE.BufferAttribute(new Float32Array(lathe.attributes.position.count), 1))
   const outer = facetedOuter()
   const glassGeo = mergeGeometries([outer, lathe])!
   outer.dispose()
   lathe.dispose()
-  const { mat: glassMat, u: glassU } = clearGlass(SG.floor * IN, { facets: true, edge: 0.65, tint: 0.07 })
-  const glass = new THREE.Mesh(glassGeo, glassMat)
-  glass.renderOrder = 2
-  glass.castShadow = false
+  const shell = glassShell(glassGeo, SG.floor * IN, { facets: true, edge: 0.65, tint: 0.07 })
+  const glassU = shell.u
+  const glass = shell.mesh
 
-  // inner radius table (inches) from the lathe samples, rim → floor
-  const wall = inner
+  // inner radius table (inches) from the profile, rim → floor
+  const wall = profile(SG_INNER, 120)
     .map(p => ({ r: p.x / IN, y: p.y / IN }))
     .filter(p => p.y <= 2.4 + 1e-4 && p.r <= SG.lipIn + 1e-4)
     .sort((a, b) => a.y - b.y)
@@ -1115,7 +1333,7 @@ export function makeShotGlass({ fill = 0.55, glow = 0.3 }: { fill?: number; glow
         `#include <emissivemap_fragment>
       {
         // the glow gathers through the thick middle, deepest low in the glass
-        float nv = abs(dot(normalize(normal), normalize(vViewPosition)));
+        float nv = min(abs(dot(normalize(normal), normalize(vViewPosition))), 1.0);
         float h = clamp((vBy - uBy.x) / max(0.004, uBy.y - uBy.x), 0.0, 1.0);
         vec3 glowBase = totalEmissiveRadiance;
         float cap = smoothstep(0.6, 0.95, vCap);
@@ -1188,7 +1406,7 @@ export function makeShotGlass({ fill = 0.55, glow = 0.3 }: { fill?: number; glow
     dispose() {
       glassGeo.dispose()
       vol.geo.dispose()
-      glassMat.dispose()
+      shell.dispose()
       ryeMat.dispose()
     },
   }
@@ -1437,7 +1655,8 @@ function bottleLabel(): THREE.CanvasTexture {
   const W = 1024
   const H = 512
   const cv = makeCanvas(W, H)
-  const tex = canvasTex(cv)
+  let settle!: () => void
+  const tex = canvasTex(cv, true, new Promise<void>(r => (settle = r)))
   const draw = () => {
     const g = cv.getContext('2d')!
     g.fillStyle = '#ece0c2'
@@ -1473,7 +1692,10 @@ function bottleLabel(): THREE.CanvasTexture {
     tex.needsUpdate = true
   }
   draw()
-  void whenFonts().then(draw)
+  void whenFonts()
+    .then(draw)
+    .catch(() => undefined)
+    .finally(settle)
   return tex
 }
 
@@ -1496,16 +1718,21 @@ export function makeRyeBottle({ fill = 0.85, cap = true }: { fill?: number; cap?
     [0.56, 10.4], [0.6, 10.55], [0.6, 10.75], [0.54, 10.85],
   ]
   const outer = profile(OUT, 110)
-  // a thin shell: outer out, inner back (offset inward), for the reflections
-  const innerPts = outer
-    .slice()
-    .reverse()
-    .map(p => new THREE.Vector2(Math.max(0, p.x - 0.09 * IN), Math.max(0.3 * IN, p.y)))
-  const shellGeo = new THREE.LatheGeometry([...outer, ...innerPts], 96)
+  // a thin shell: outer out, inner back (offset inward), for the reflections; lean (the long
+  // straight body and neck carry no rows, the shoulder and the lip keep theirs)
+  const outside = leanProfile(OUT, 0.004, 3, 0.02)
+  // the inside: back down, 0.09" in (flat over the punt, where the lathe's own normals stay)
+  const inside: Lean = { pts: [], nor: [] }
+  for (let j = outside.pts.length - 1; j >= 0; j--) {
+    const p = outside.pts[j]
+    const n = outside.nor[j]
+    inside.pts.push(new THREE.Vector2(Math.max(0, p.x - 0.09 * IN), Math.max(0.3 * IN, p.y)))
+    inside.nor.push(n && p.y >= 0.3 * IN ? n.clone().negate() : null)
+  }
+  const shellGeo = latheLean([outside, inside], 64)
   shellGeo.deleteAttribute('uv')
-  const { mat: glassMat } = clearGlass(0.3 * IN, { tint: 0.05, edge: 0.5, solid: 0.12 })
-  const shell = new THREE.Mesh(shellGeo, glassMat)
-  shell.renderOrder = 2
+  const glass = glassShell(shellGeo, 0.3 * IN, { tint: 0.05, edge: 0.5, solid: 0.12 })
+  const shell = glass.mesh
 
   // the whiskey: a non-transmissive stand-in (dark amber, glowing where it's thick)
   // follows the glass 0.1" inside, from the punt to `fill` (0.85 = the shoulder, 1 = up the neck)
@@ -1517,7 +1744,7 @@ export function makeRyeBottle({ fill = 0.85, cap = true }: { fill?: number; cap?
     liq.push(new THREE.Vector2(Math.max(0.001, p.x - 0.1 * IN), p.y))
   }
   liq.push(new THREE.Vector2(Math.max(0.001, liq[liq.length - 1].x), top), new THREE.Vector2(0, top))
-  const liqGeo = new THREE.LatheGeometry(liq, 64)
+  const liqGeo = latheLean([lean(liq, 0.002, 3, 0.05)], 64)
   const liqMat = new THREE.MeshPhysicalMaterial({
     color: '#3a1604',
     roughness: 0.12,
@@ -1583,7 +1810,7 @@ export function makeRyeBottle({ fill = 0.85, cap = true }: { fill?: number; cap?
     },
     dispose() {
       shellGeo.dispose()
-      glassMat.dispose()
+      glass.dispose()
       liqGeo.dispose()
       liqMat.dispose()
       labelGeo.dispose()

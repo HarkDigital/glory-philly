@@ -57,14 +57,21 @@
   color: var(--amber-hot);
 }
 
-/* Upcoming Events: a ghost pill under the copy (the stage copy is for mouse/touch;
-   keyboard users reach the same link in the accessible copy) */
-.ev .ev-upcoming {
-  align-self: flex-start;
+/* the calls under the copy: Event Inquiry Form (Glory red, lands on the form beat) and
+   Upcoming Events (a ghost pill). The stage copy is for mouse/touch; keyboard users reach
+   the same link and the form itself in the accessible copy */
+.ev .ev-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
   margin-top: 6px;
-  gap: 10px;
 }
-.ev .ev-upcoming .ev-arrow {
+.ev .ev-ctas .hud-btn {
+  gap: 10px;
+  white-space: nowrap;
+}
+.ev .ev-ctas .ev-arrow {
   font-size: 1.05em;
   line-height: 1;
 }

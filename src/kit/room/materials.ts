@@ -200,6 +200,8 @@ export function poolHook(mesh: THREE.Object3D, pools: PoolSet, root: THREE.Objec
 export interface RoomMaterials {
   pools: PoolSet
   walnut: THREE.MeshStandardMaterial
+  /** pale natural wood (the chalkboard frames, ref6) */
+  maple: THREE.MeshStandardMaterial
   /** black-painted steel (ledges, brackets, cages, cooler frames) */
   steel: THREE.MeshStandardMaterial
   /** aged brass (sconce plates, arms, sockets) */
@@ -275,6 +277,17 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
         )
     },
   )
+  // pale natural wood (the tap boards' frames in ref6: blonde maple/pine, amber-finished) with a fine grain
+  const maple = P(new THREE.MeshStandardMaterial({ color: '#c8955e', map: grainDetail(), roughness: 0.52, envMapIntensity: 0.5 }), 'maple', s => {
+    s.fragmentShader = s.fragmentShader.replace(
+      '#include <map_fragment>',
+      /* glsl */ `{
+        // the grain map is a grey data tile: a gentle ±12 % along the boards, never a pattern of its own
+        float gd = texture2D(map, vMapUv).r;
+        diffuseColor.rgb *= 0.88 + 0.24 * gd;
+      }`,
+    )
+  })
   const steel = P(new THREE.MeshStandardMaterial({ color: '#141414', metalness: 0.55, roughness: 0.42, envMapIntensity: 0.9 }), 'steel')
   // oil-rubbed, aged brass: dark (a bulb 12 cm away would turn bright brass into a glowing disc)
   const brass = P(new THREE.MeshStandardMaterial({ color: '#35281a', metalness: 1, roughness: 0.6, envMapIntensity: 1 }), 'brass')
@@ -404,7 +417,9 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
           attribute float aSeed;
           attribute float aAround;
           attribute float aFill;
+          attribute float aClear;
           varying float vFill;
+          varying float vClear;
           varying float vBY;
           varying float vPart;
           varying float vLabelV;
@@ -416,7 +431,7 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
         .replace(
           '#include <begin_vertex>',
           /* glsl */ `#include <begin_vertex>
-          vPart = aPart; vLabelV = aLabelV; vGlass = aGlass; vLabel = aLabel; vSeed = aSeed; vBUv = vec2(aAround, 0.0); vFill = aFill; vBY = position.y;`,
+          vPart = aPart; vLabelV = aLabelV; vGlass = aGlass; vLabel = aLabel; vSeed = aSeed; vBUv = vec2(aAround, 0.0); vFill = aFill; vClear = aClear; vBY = position.y;`,
         )
       s.fragmentShader = s.fragmentShader
         .replace(
@@ -430,6 +445,7 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
           varying float vSeed;
           varying vec2 vBUv;
           varying float vFill;
+          varying float vClear;
           varying float vBY;
           float bPart;
           float bEmpty;
@@ -486,8 +502,20 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
             }
             bc = mix(bc, inkC, clamp(m, 0.0, 1.0) * 0.82);
             bc *= 0.78 + 0.22 * (1.0 - smoothstep(0.7, 1.0, x));
+          } else if (vClear > 0.5) {
+            // CLEAR glass (most of the rail, ref1/ref4). Below the fill line the spirit: a whiskey
+            // or rum glows its own amber in the back bar's light; a water-white spirit mostly shows
+            // the dim, warm room through it (a pale sheen would read as milk glass). Above it,
+            // clear glass. A thin bright meniscus at the fill line sells "clear, with liquid".
+            // No diffuse to speak of: reflections do the rest.
+            float lumS = dot(vGlass, vec3(0.3, 0.59, 0.11));
+            vec3 spirit = vGlass * vec3(1.0, 0.93, 0.8) * mix(1.0, 0.5, smoothstep(0.35, 0.6, lumS));
+            vec3 liquid = mix(spirit, vec3(0.16, 0.155, 0.145), bEmpty);
+            float men = 1.0 - smoothstep(0.0, 0.0025, abs(vBY - vFill));
+            bc = vec3(0.012);
+            roomTint = liquid * 1.6 + vec3(0.9, 0.78, 0.6) * men;
           } else {
-            // glass: next to no diffuse — its colour comes through it (below) and off it (reflections)
+            // coloured glass: next to no diffuse — its colour comes through it (below) and off it (reflections)
             vec3 liquid = mix(vGlass, vGlass * 0.2 + vec3(0.015), bEmpty);
             bc = liquid * 0.14;
             roomTint = liquid * 1.6;
@@ -510,14 +538,18 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
           if (bPart < 0.5) {
             // the back bar's light passing through the liquid: brightest face-on, dark at the rims
             float facing = abs(dot(normalize(vNormal), normalize(vViewPosition)));
-            totalEmissiveRadiance += roomTint * uBottleGlow * (0.08 + 0.92 * facing * facing);
+            // clear glass is a lens: a bright core band down the middle, dark sides (a uniform
+            // pale body reads as milk glass); coloured glass glows broadly
+            float shape = vClear > 0.5 ? 0.05 + 2.0 * smoothstep(0.72, 0.99, facing) : 0.08 + 0.92 * facing * facing;
+            totalEmissiveRadiance += roomTint * uBottleGlow * shape;
           }`,
         )
     },
   )
   bottles.defines = { ROOM_TRANSMIT: '' }
 
-  const spouts = P(new THREE.MeshStandardMaterial({ color: '#ffffff', vertexColors: true, metalness: 1, roughness: 0.16 }), 'spouts')
+  // brushed steel pourers: satin enough that a bulb's glint stays a glint (0.16 bloomed into white "candles")
+  const spouts = P(new THREE.MeshStandardMaterial({ color: '#e6e8ea', vertexColors: true, metalness: 1, roughness: 0.3 }), 'spouts')
   const glassware = new THREE.MeshStandardMaterial({
     color: '#dfe6e4',
     roughness: 0.05,
@@ -547,6 +579,7 @@ export function roomMaterials({ glow = 1 } = {}): RoomMaterials {
   return {
     pools,
     walnut,
+    maple,
     steel,
     brass,
     chrome,

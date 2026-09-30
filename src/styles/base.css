@@ -594,7 +594,16 @@ a {
     0 0 0 3px rgba(242, 163, 58, 0.95),
     0 0 0 6px rgba(0, 0, 0, 0.9),
     0 6px 20px rgba(0, 0, 0, 0.4);
-  outline: none;
+  /* the ring above is box-shadow, which forced-colors mode drops: a
+     transparent outline turns into a system-colour ring there instead */
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+@media (forced-colors: active) {
+  .sr-copy :is(a, button):focus {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
 }
 .sr-copy :is(h1, h2):focus {
   position: fixed;

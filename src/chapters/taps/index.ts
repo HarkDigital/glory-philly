@@ -5,7 +5,7 @@ import { clamp, ease, lerp, smoothstep } from '../../core/math'
 import { nextFrame } from '../../core/yield'
 import { BAR, BRAND, DRAFTS, LINKS, SECTIONS, TAPS_UI } from '../../content'
 import { makeGlass, makeBacklight, makePourStream, BEERS, type BeerStyle, type Glass, type GlassShape } from '../../kit/beer'
-import { makeTapWall, TRAY_Y, FAUCET_Y, FAUCET_Z, type TapBay, type TapSpec } from '../../kit/tap'
+import { makeTapWall, TRAY_Y, FAUCET_Y, FAUCET_Z, type TapBay, type TapSpec, type TapWall } from '../../kit/tap'
 import { makeBarRun, prepareRoom, type RoomKit } from '../../kit/room'
 import { StoryClock } from '../../kit/pace'
 import {
@@ -33,10 +33,10 @@ import './taps.css'
  *               cut covers the first ~3%), pulling back into
  *  0.045–0.235  THE REVEAL: the camera pulls back along the wall — 36 handles
  *               on stainless manifolds in Glory's real back bar (walnut plank
- *               cladding, boxy clad columns with wire-cage sconces, the brick
- *               "Old 1837" bay, shelves packed with LPs, pendants, the black
- *               ceiling and its silver duct) — "36 beers on tap." with the
- *               Bar page intro (first sentence as the lead).
+ *               cladding, boxy clad columns with wire-cage sconces, a brick
+ *               bay under a shelf of spouted bottles, shelves packed with LPs,
+ *               pendants, the black ceiling and its silver duct) — "36 beers
+ *               on tap." with the Bar page intro (first sentence as the lead).
  *  0.25–0.49    AMERICAN   (19) · dolly along its stretch, settle on one handle:
  *  0.51–0.67    INTERNATIONAL (9)   it pulls forward and pours into a glass
  *  0.69–0.85    LOCAL      (7)   tinted for the group. The group's list sits in
@@ -50,8 +50,9 @@ import './taps.css'
  *
  * THE ROOM (room.ts): each group of taps stands in its own bay between
  * walnut-clad columns, as the back bar's bays do in ref1 — American under two
- * shelves packed with LPs, International against the brick with the painted
- * "Old 1837", Local under one LP face-out on a steel ledge (ref4). A records
+ * shelves packed with LPs, International against bare brick under a shelf of
+ * spouted bottles (the painted "Old 1837" stays with the chapters that look at
+ * ref1's back bar), Local under one LP face-out on a steel ledge (ref4). A records
  * bay with spouted liquor steps opens the run on the left. The long oiled bar
  * with its black rubber rail (kit/room makeBarRun) runs in front.
  *
@@ -65,6 +66,14 @@ import './taps.css'
  *
  * The camera, the pours and the rig run on a StoryClock (kit/pace.ts), so a
  * fling never sweeps the lit wall across the frame faster than it can read.
+ *
+ * THE COPY COLUMN holds ONE panel at a time (intro → American → International
+ * → Local → the end): the scroll picks which one owns the column (hand-offs at
+ * the middle of each gap), and the swap runs in TIME — the outgoing panel
+ * clears (~0.14 s) before the next comes up (~0.3 s) — so no scroll position
+ * rests on two lists printed over each other or on a half-faded one.
+ * Reduced motion / Motion off swap instantly.
+ *
  * The 36th handle is the house handle (the red G roundel, no beer named):
  * 35 beers are listed and the wall has 36 taps.
  */
@@ -79,6 +88,20 @@ const GROUPS: [number, number][] = [
 const END_A = 0.87
 /** each group mid-pour: handle pulled, callout + panel up (u = 0.45) */
 const ANCHORS = GROUPS.map(([a, b]) => +(a + 0.45 * (b - a)).toFixed(3))
+/**
+ * The copy column's owners in order — 0 the intro, 1..3 the groups' boards, 4 the end — and where
+ * each takes over (the middle of each gap). Before INTRO_A (the in-beat macro) nobody owns it.
+ */
+const SLOT_FROM = [INTRO_A, (INTRO_B + GROUPS[0][0]) / 2, ...GROUPS.slice(1).map(([a], g) => (GROUPS[g][1] + a) / 2), (GROUPS[GROUPS.length - 1][1] + END_A) / 2]
+function slotAt(q: number) {
+  if (!(q >= SLOT_FROM[0])) return -1
+  let i = 0
+  while (i < SLOT_FROM.length - 1 && q >= SLOT_FROM[i + 1]) i++
+  return i
+}
+/** seconds: the outgoing panel clears, then the next one comes up */
+const SWAP_OUT = 0.14
+const SWAP_IN = 0.3
 
 /** the handle that pours per group (by name; falls back to the middle), its glass and beer */
 const POURS: { name: string; shape: GlassShape; beer: BeerStyle; tint: number }[] = [
@@ -314,7 +337,7 @@ export default function taps(): Chapter {
   const clock = new StoryClock({ rate: 0.2 })
   let layout = computeLayout(1440, 900)
 
-  const wall = makeTapWall({ taps: TAPS.map(t => t.spec), x: TAP_X, bays: BAYS })
+  let wall: TapWall
   let room: TapRoom
   let bar: RoomKit
   const glasses: Glass[] = []
@@ -331,6 +354,10 @@ export default function taps(): Chapter {
   const boards: { root: HTMLElement; title: HTMLElement; items: HTMLElement[]; pager: HTMLElement; page: number; per: number }[] = []
   let endBox: HTMLElement
   let callout: Callout
+  /** the copy column: each slot's visibility (0..1, linear in time) and the scrim's */
+  const slotV = [0, 0, 0, 0, 0]
+  let scrimV = 0
+  let swapping = false
 
   const tmp = new THREE.Vector3()
   const tmp2 = new THREE.Vector3()
@@ -354,6 +381,11 @@ export default function taps(): Chapter {
     anchors: ANCHORS,
 
     async init(ctx: ChapterContext) {
+      // the plates are ~40 CSS px wide at most (the in-beat macro): an 80-px tile covers a retina desktop,
+      // 60 a phone (DPR ≤ 1.5)
+      wall = makeTapWall({ taps: TAPS.map(t => t.spec), x: TAP_X, bays: BAYS, tileW: ctx.mobile ? 60 : 80 })
+      // sleeve art: 1024² on desktop, 512² on phones (the presented LP is ≤ ~420 device px there)
+      const art = ctx.mobile ? 512 : 1024
       // ---- the room: Glory's back bar, built from the room kit (maps across frames first: no long task)
       const chalk = makeChalkboard({ w: 0.36, title: TAPS_UI.drafts, label: TAPS_UI.lastUpdate, date: BAR.lastUpdate, count: `${BAR.taps} ${TAPS_UI.tap}s` })
       const spec: TapRoomSpec = {
@@ -364,7 +396,7 @@ export default function taps(): Chapter {
         colD: COL_D,
         counterFront: COUNTER_FRONT,
         brickBay: [BAYS[1].x0, BAYS[1].x1],
-        ledgeCover: coverTexture({ title: BRAND.short, kicker: 'Glory Records', sub: BRAND.motto, cat: catNo(29), paper: 'amber' }),
+        ledgeCover: coverTexture({ title: BRAND.short, kicker: 'Glory Records', sub: BRAND.motto, cat: catNo(29), paper: 'amber' }, art),
         chalk,
         mobile: ctx.mobile,
       }
@@ -432,7 +464,7 @@ export default function taps(): Chapter {
         const last = first + g.beers.length - 1
         const cat = catNo(21 + gi)
         return makeSleeve({
-          front: coverTexture({ title: g.title, kicker: TAPS_UI.drafts, sub: `${TAPS_UI.tap}s ${TAPS[first].spec.num}–${TAPS[last].spec.num}`, cat, paper: LP_PAPER[gi] }),
+          front: coverTexture({ title: g.title, kicker: TAPS_UI.drafts, sub: `${TAPS_UI.tap}s ${TAPS[first].spec.num}–${TAPS[last].spec.num}`, cat, paper: LP_PAPER[gi] }, art),
           // read lying face-down on the stack, from the crate's front
           back: tracklistTexture({
             flip: true,
@@ -442,7 +474,7 @@ export default function taps(): Chapter {
             paper: LP_PAPER[gi] === 'red' ? 'cream' : LP_PAPER[gi],
             tracks: g.beers.map((b, k) => ({ name: b, value: TAPS[first + k].spec.num })),
             notes: `${TAPS_UI.lastUpdate} ${BAR.lastUpdate}`,
-          }),
+          }, art),
         })
       })
       const labels = DRAFTS.map((g, gi) => labelTexture({ title: g.title, sub: TAPS_UI.drafts, side: 'SIDE A', cat: catNo(21 + gi), paper: LABEL_PAPER[gi] }))
@@ -537,9 +569,12 @@ export default function taps(): Chapter {
     onEnter() {
       clock.reset()
       rig?.reset()
+      // the cut covers the entry: the column comes up fresh (no stale panel from the last visit)
+      slotV.fill(0)
+      scrimV = 0
     },
 
-    busy: () => clock.busy,
+    busy: () => clock.busy || swapping,
 
     update(local, frame, ctx) {
       if (frame.width !== layout.w || frame.height !== layout.h) layout = computeLayout(frame.width, frame.height)
@@ -588,7 +623,6 @@ export default function taps(): Chapter {
       crate.group.position.x = crateXAt(q)
       rig.update(itemAt(q), frame, 0)
 
-      const endV = smoothstep(END_A - 0.01, END_A + 0.02, q)
       if (q > END_A - 0.02) tint = 0.45
       ctx.post.params.beer = tint
 
@@ -611,6 +645,18 @@ export default function taps(): Chapter {
       // at the end the room's own bulbs light the boards (a hot key would flatten the chalk)
       w.spot = (LIGHT.spot - (LIGHT.spot - LIGHT.spotCream) * lp) * (1 - 0.55 * smoothstep(END_A - 0.02, END_A + 0.02, q))
       ctx.post.params.bloomThreshold = lerp(1.05, 1.4, lp)
+      // bloom only where a lit filament or a chrome glint is the subject: the reveal (sconces, pendants,
+      // the duct) and the dollies along the manifolds between groups. On the pour + crate + list beats
+      // and at the boards it moves < 3% of pixels (mean < 1.6/255) for ~40% of the frame's GPU time:
+      // skip the pass there (post.ts drops it below 0.01), ramped with the camera so it never pops
+      let quiet = 0
+      for (let g = 0; g < GROUPS.length; g++) {
+        const u = uOf(q, g)
+        // the last group hands straight on to the end (no bloom between the Local pour and the boards)
+        const out = g === GROUPS.length - 1 ? 0 : smoothstep(0.94, 1.04, u)
+        quiet = Math.max(quiet, smoothstep(0.24, 0.34, u) * (1 - out))
+      }
+      ctx.post.params.bloomStrength *= 1 - quiet
       w.spotColor = LIGHT.spotColor
       w.spotPos.set(shot.x + 1.4, 4.6, 3.2)
       w.spotAt.set(shot.x - 0.1, 0.8, -0.2)
@@ -639,18 +685,31 @@ export default function taps(): Chapter {
       bar.setAmbient(LIGHT.barAmb)
       syncVinylLights(ctx.world)
 
-      // ---- HUD
-      const introV = smoothstep(INTRO_A, INTRO_A + 0.02, q) * (1 - smoothstep(INTRO_B - 0.02, INTRO_B + 0.005, q))
-      reveal(intro, introV)
-      setRise(introTitle, q > INTRO_A - 0.005 && q < INTRO_B)
-      let boardMax = 0
+      // ---- HUD: the copy column shows ONE panel; the scroll picks it, the swap runs in time
+      const owner = slotAt(q)
+      if (rm || frame.still) {
+        for (let i = 0; i < slotV.length; i++) slotV[i] = i === owner ? 1 : 0
+        scrimV = owner >= 0 ? 1 : 0
+      } else {
+        const dt = Math.max(0, frame.dt)
+        let rest = 0
+        for (let i = 0; i < slotV.length; i++) {
+          if (i === owner) continue
+          slotV[i] = Math.max(0, slotV[i] - dt / SWAP_OUT)
+          rest = Math.max(rest, slotV[i])
+        }
+        if (owner >= 0 && rest <= 0) slotV[owner] = Math.min(1, slotV[owner] + dt / SWAP_IN)
+        // the scrim holds through a swap (it only goes with the in-beat)
+        scrimV = owner >= 0 ? Math.min(1, scrimV + dt / SWAP_IN) : Math.max(0, scrimV - dt / SWAP_OUT)
+      }
+      swapping = slotV.some((v, i) => (i === owner ? v < 1 : v > 0)) || scrimV !== (owner >= 0 ? 1 : 0)
+      const shown = (i: number) => smoothstep(0, 1, slotV[i])
+      reveal(intro, shown(0))
+      setRise(introTitle, owner === 0)
       for (let g = 0; g < boards.length; g++) {
-        const [a, b] = GROUPS[g]
-        const v = smoothstep(a - 0.015, a + 0.005, q) * (1 - smoothstep(b - 0.005, b + 0.015, q))
-        boardMax = Math.max(boardMax, v)
         const bd = boards[g]
-        reveal(bd.root, v)
-        setRise(bd.title, v > 0.5)
+        reveal(bd.root, shown(g + 1))
+        setRise(bd.title, owner === g + 1)
         // paging (phones / short landscape): every name at rest somewhere in the range
         const n = bd.items.length
         const per = Math.min(n, layout.per[g])
@@ -665,8 +724,8 @@ export default function taps(): Chapter {
           bd.pager.textContent = pages > 1 ? `${page + 1} / ${pages}` : ''
         }
       }
-      reveal(endBox, endV)
-      reveal(scrim, Math.max(introV, boardMax, endV), 0)
+      reveal(endBox, shown(4))
+      reveal(scrim, smoothstep(0, 1, scrimV), 0)
 
       // callout on the pulled handle
       let cg = -1

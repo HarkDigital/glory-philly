@@ -36,7 +36,7 @@ import {
   brickPanelMapsAsync,
   coolerMap,
   ductMaps,
-  galvMaps,
+  galvMapsAsync,
   glowTexture,
   grainDetail,
   hifiMaps,
@@ -163,9 +163,9 @@ export function assemble(o: KitOpts, fill: (c: Ctx) => { turntable?: Turntable |
   }
 }
 
-/** a Glory typographic cover (never real album art) */
-export function houseCover(i = 1, paper: 'cream' | 'red' | 'stout' | 'amber' | 'bone' = 'cream', title: string = BRAND.short) {
-  return coverTexture({ title, kicker: `${BRAND.neighborhood} · Philadelphia`, cat: catNo(i), paper })
+/** a Glory typographic cover (never real album art); `res` px square (default 1024) */
+export function houseCover(i = 1, paper: 'cream' | 'red' | 'stout' | 'amber' | 'bone' = 'cream', title: string = BRAND.short, res = 1024) {
+  return coverTexture({ title, kicker: `${BRAND.neighborhood} · Philadelphia`, cat: catNo(i), paper }, res)
 }
 
 // ─── the back bar (ref1) ────────────────────────────────────────────────────
@@ -292,7 +292,8 @@ export function makeBackBar(o: BackBarOpts = {}): RoomKit {
       }
     }
     if (o.sleeve !== false) {
-      const s = makeSleeve({ front: o.sleeve instanceof THREE.Texture ? o.sleeve : houseCover(1, 'red') })
+      // (a counter sleeve: 1024 on desktop for the hero's close shots, 512 on phones)
+      const s = makeSleeve({ front: o.sleeve instanceof THREE.Texture ? o.sleeve : houseCover(1, 'red', BRAND.short, c.mobile ? 512 : 1024) })
       sleeves.push(s)
       c.b.push(b2[1] - 0.175, cy, wz)
       const { centre } = addLeaningSleeve(c, s, { lean: 0.15 })
@@ -320,7 +321,7 @@ export function makeBackBar(o: BackBarOpts = {}): RoomKit {
         const xs = b3[1] - singles
         addRecordShelf(c, b3[0], xs, { y: recY, z: wz, rows: 1, top: false, sides: true })
         wood(c, b3[1] - xs, 0.032, 0.34, (xs + b3[1]) / 2, recY - 0.016, wz + 0.17)
-        addRecordRow(c, { x0: xs + 0.012, x1: b3[1] - 0.03, y: recY, zBack: wz, depth: 0.34, singles: true })
+        addRecordRow(c, { x0: xs + 0.012, x1: b3[1] - 0.03, y: recY, zBack: wz, depth: 0.34, singles: true, maxH: 0.365 - 0.032 })
         wood(c, 0.028, 0.365, 0.34, b3[1] - 0.014, recY + 0.1825 - 0.032, wz + 0.17)
         A.singles = new THREE.Vector3((xs + b3[1]) / 2, recY + 0.09, wz + 0.34)
         if (rows > 1) addRecordShelf(c, b3[0], b3[1], { y: recY + 0.365, z: wz, rows: rows - 1, top: true, sides: true })
@@ -377,13 +378,20 @@ function backBarBrick(o: BackBarOpts, w: number, _h: number) {
 const BACKBAR_BRICK = (o: BackBarOpts) => ({ w: 1.4, h: (o.height ?? 3.2) - 0.24 - 1.3 })
 
 /**
- * Build the kit's shared maps ahead, in slices across frames (walnut, the LP
- * atlas, grain, hi-fi, cooler, duct, glows; the back bar's painted brick),
- * so the sync makers that follow are instant. Call it first in an async
- * chapter init: `await prepareRoom({ backBar: {} })`.
+ * Build the kit's shared maps ahead so the sync makers that follow are
+ * instant. The heavy per-pixel ones (walnut, galvanized sheet; the back bar's painted brick)
+ * go to the texture worker at once, while the main thread draws the light
+ * canvases (the LP atlas, grain, hi-fi, cooler, duct, glows) a frame apart —
+ * no long task. Call it first in an async chapter init:
+ * `await prepareRoom({ backBar: {} })`; prefetch your own brick panels the
+ * same way with brickPanelMapsAsync (they queue in the same worker).
  */
 export async function prepareRoom(o: { backBar?: BackBarOpts } = {}) {
-  await walnutMapsAsync()
+  const heavy: Promise<unknown>[] = [walnutMapsAsync(), galvMapsAsync()]
+  if (o.backBar && o.backBar.brick !== false) {
+    const { w, h } = BACKBAR_BRICK(o.backBar)
+    heavy.push(brickPanelMapsAsync(w, h, { lines: backBarBrick(o.backBar, w, h).lines, seed: 4 }))
+  }
   await nextFrame()
   spineAtlas()
   grainDetail()
@@ -392,15 +400,10 @@ export async function prepareRoom(o: { backBar?: BackBarOpts } = {}) {
   coolerMap()
   ductMaps()
   await nextFrame()
-  galvMaps()
   rubberData()
   glowTexture()
-  pitchTexture()
-  await nextFrame()
-  if (o.backBar && o.backBar.brick !== false) {
-    const { w, h } = BACKBAR_BRICK(o.backBar)
-    await brickPanelMapsAsync(w, h, { lines: backBarBrick(o.backBar, w, h).lines, seed: 4 })
-  }
+  // (the TV's pitch is built only if a kit hangs a TV)
+  await Promise.all(heavy)
 }
 
 // ─── the record column (ref4) ───────────────────────────────────────────────
@@ -420,6 +423,8 @@ export interface RecordColumnOpts extends KitOpts {
   sconce?: boolean
   /** the column's width (ref4's is narrow: the LP nearly spans it) */
   columnWidth?: number
+  /** the front LP of the leaning stack left of the column (default: a Glory typographic cover on amber) */
+  stackCover?: THREE.Texture
 }
 
 /**
@@ -485,7 +490,11 @@ export function makeRecordColumn(o: RecordColumnOpts = {}): RoomKit {
     const l1 = -colW / 2 - 0.005
     addShelf(c, l1 - X0, 0.26, { x: (X0 + l1) / 2, y: 1.66, z: wz })
     addBottleRow(c, X0 + 0.04, X0 + 0.5, { y: 1.66, z: wz + 0.13, slack: 0.04, spout: 0, maxH: 2.3 - 0.032 - 1.66 })
-    faceOutStack(c, { x: l1 - 0.26, y: 1.66, z: wz, n: 7 })
+    const cov = o.stackCover ?? stackCover(c.mobile)
+    if (!o.stackCover) c.owned.push(cov)
+    const front = makeSleeve({ front: cov })
+    sleeves.push(front)
+    faceOutStack(c, { x: l1 - 0.26, y: 1.66, z: wz, n: 7, front })
     A.stack = new THREE.Vector3(l1 - 0.26, 1.82, wz + 0.1)
     addShelf(c, l1 - X0, 0.26, { x: (X0 + l1) / 2, y: 2.3, z: wz })
     addBottleRow(c, X0 + 0.06, X0 + 0.36, { y: 2.3, z: wz + 0.13, slack: 0.03, spout: 0 })
@@ -504,30 +513,55 @@ export function makeRecordColumn(o: RecordColumnOpts = {}): RoomKit {
   })
 }
 
+/** the face-out stack's front LP: a Glory typographic cover (never real album art) */
+export function stackCover(mobile = false) {
+  return coverTexture({ title: BRAND.short, kicker: `${BRAND.neighborhood} · Philadelphia`, cat: catNo(2), paper: 'amber' }, mobile ? 256 : 512)
+}
+
 /**
  * A few LPs standing face-out on a shelf, leaning back on the wall like
  * ref4's stack: parallel boards, each one's back 0.4 mm clear of the one
- * behind, the rearmost 3 mm off the wall. Local: shelf top y, wall z.
+ * behind, the rearmost 3 mm off the wall. The FRONT one is a real kit/vinyl
+ * sleeve (`front`, a Glory cover) — the atlas's small generic tiles read as a
+ * blank card face-on. Local: shelf top y, wall z.
  */
-function faceOutStack(c: Ctx, { x = 0, y = 0, z = 0, n = 6, lean = 0.2 } = {}) {
+function faceOutStack(c: Ctx, { x = 0, y = 0, z = 0, n = 6, lean = 0.2, front = null as Sleeve | null } = {}) {
   const r = c.r
   let zb = z + 0.003
   for (let i = 0; i < n; i++) {
     const t = 0.0045 + r() * 0.002
     const h = 0.314
     const d = 0.314
+    const dx = (r() - 0.5) * 0.01
+    const tint = 0.8 + r() * 0.25
+    const art: [number, number] = [Math.floor(r() * 128), Math.floor(r() * 32)]
+    if (front && i === n - 1) {
+      // the sleeve: 0.315 m, SLEEVE.t thick, pivot at its bottom-centre edge (thickness centred on z)
+      const S = 0.315
+      const st = 0.014 * S
+      const zp = zb + S * Math.sin(lean) + (st / 2) * Math.cos(lean)
+      const lift = (st / 2) * Math.sin(lean) + 0.0006
+      const m = new THREE.Matrix4()
+        .makeTranslation(x + dx, y + lift, zp)
+        .multiply(new THREE.Matrix4().makeRotationX(-lean))
+        .multiply(new THREE.Matrix4().makeScale(S, S, S))
+      c.b.object(front.group, m)
+      withPools(front.material, c.M.pools, 'sleeve')
+      c.hooks.push(front.mesh)
+      break
+    }
     // the back face's top must clear the previous board: pivot z so that top-back = zb
     const zp = zb + h * Math.sin(lean) + (t / 2) * Math.cos(lean)
     const lift = (t / 2) * Math.sin(lean) + 0.0006
     // record box: x = thickness → turn it so thickness runs along z (covers face ±z)
     const m = new THREE.Matrix4()
-      .makeTranslation(x + (r() - 0.5) * 0.01, y + lift, zp)
+      .makeTranslation(x + dx, y + lift, zp)
       .multiply(new THREE.Matrix4().makeRotationX(-lean))
       .multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))
       .multiply(new THREE.Matrix4().makeScale(t, h, d))
     c.b.instance('records', recordGeometry, c.M.records, m, {
-      color: new THREE.Color().setScalar(0.8 + r() * 0.25),
-      attrs: { aArt: [Math.floor(r() * 128), Math.floor(r() * 32)] },
+      color: new THREE.Color().setScalar(tint),
+      attrs: { aArt: art },
     })
     // the next board's back sits on this one's front at the foot (parallel planes: t / cos apart)
     zb += (t + 0.0004) / Math.cos(lean)
@@ -676,7 +710,7 @@ export function tapBoards(): ChalkSpec[] {
 }
 
 /**
- * Tall black chalkboards in walnut frames on a black wall (ref6), side by
+ * Tall black chalkboards in pale wood frames on a black wall (ref6), side by
  * side. Local: the wall at z = 0, boards centred on x. anchors: board0..
  */
 export function makeChalkboards(o: ChalkWallOpts = {}): RoomKit {

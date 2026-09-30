@@ -63,6 +63,15 @@ export interface ChapterContext {
   stage: HTMLElement
   mobile: boolean
   reducedMotion: boolean
+  /**
+   * The site-wide texture budget (src/core/residency.ts): the edge size to
+   * draw / decode art, photos and canvases at. `px` capped at 1024 on desktop
+   * and 512 on phones (~250 MB of textures there); a full-frame subject may
+   * ask for `texRes(px, 2)`. Route every canvas / photo size through it.
+   * A texture that can rebuild itself sets `texture.userData.reload` and the
+   * engine frees its GPU copy while its chapter is far away (see residency.ts).
+   */
+  texRes(px: number, scale?: number): number
 }
 
 /**

@@ -190,10 +190,10 @@ export function createEventForm(o: EventFormOpts = {}): HTMLElement {
       </form>
       <div class="gef-done" hidden>
         <p class="gef-done-t" tabindex="-1"></p>
-        <p class="gef-done-b"></p>
+        <p class="gef-done-b" id="${id}-done-b"></p>
         <dl class="gef-recap" hidden></dl>
         <div class="gef-mailed" hidden>
-          <p class="gef-mailed-q">${esc(F.mailedHelp)} <a class="gef-link gef-mailed-link" href="${esc(inquiryMailto())}">${esc(F.to)}</a></p>
+          <p class="gef-mailed-q" id="${id}-mailed-q">${esc(F.mailedHelp)} <a class="gef-link gef-mailed-link" href="${esc(inquiryMailto())}">${esc(F.to)}</a></p>
           <p class="gef-copy-status" role="status"></p>
         </div>
         <div class="gef-done-actions">
@@ -217,6 +217,7 @@ export function createEventForm(o: EventFormOpts = {}): HTMLElement {
   const doneB = $('.gef-done-b')
   const recap = $('.gef-recap')
   const mailed = $('.gef-mailed')
+  const mailedQ = $('.gef-mailed-q')
   const mailedLink = $<HTMLAnchorElement>('.gef-mailed-link')
   const copyBtn = $<HTMLButtonElement>('.gef-copy')
   const copyStatus = $('.gef-copy-status')
@@ -277,13 +278,26 @@ export function createEventForm(o: EventFormOpts = {}): HTMLElement {
     return !!msg
   }
 
-  /** scroll a field into view inside the card only (never the page: the page scroll IS the story) */
+  /**
+   * Bring a field into view. A card that scrolls inside itself (the docked card on a
+   * small slot) scrolls only itself. The DOCKED card never scrolls the page (the page
+   * scroll IS the story); the static card (a page, the no-WebGL fallback) scrolls the
+   * page to it when it's off-screen, so moved focus is always seen.
+   */
   const into = (el: HTMLElement) => {
-    if (body.scrollHeight <= body.clientHeight + 1) return
-    const b = body.getBoundingClientRect()
+    if (body.scrollHeight > body.clientHeight + 1) {
+      const b = body.getBoundingClientRect()
+      const r = el.getBoundingClientRect()
+      if (r.top < b.top + 12) body.scrollTop += r.top - b.top - 40
+      else if (r.bottom > b.bottom - 12) body.scrollTop += r.bottom - b.bottom + 40
+    }
+    if (root.closest('.gef-dock')) return
     const r = el.getBoundingClientRect()
-    if (r.top < b.top + 12) body.scrollTop += r.top - b.top - 40
-    else if (r.bottom > b.bottom - 12) body.scrollTop += r.bottom - b.bottom + 40
+    const vh = window.innerHeight || document.documentElement.clientHeight
+    // (a fixed top bar may sit over the first ~80 px of the page)
+    if (r.top >= 80 && r.bottom <= vh - 16) return
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches || document.documentElement.classList.contains('motion-off')
+    el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: still ? 'auto' : 'smooth' })
   }
   const focusEl = (el: HTMLElement) => {
     el.focus({ preventScroll: true })
@@ -417,7 +431,10 @@ export function createEventForm(o: EventFormOpts = {}): HTMLElement {
     }
     say('')
     body.scrollTop = 0
-    doneT.focus({ preventScroll: true })
+    // the title takes focus; the body (and, when mailed, the way round a mail app that
+    // didn't open) is its description, so a screen reader reads the instruction too
+    doneT.setAttribute('aria-describedby', how === 'mailed' ? `${doneB.id} ${mailedQ.id}` : doneB.id)
+    focusEl(doneT)
     o.onDone?.(how)
   }
 

@@ -14,6 +14,10 @@ import { clamp, ease, lerp, smoothstep } from '../../core/math'
 export const LONG = 1.0
 const BORDER = 0.055
 const GAP = 0.006
+/** card stock thickness */
+const THICK = 0.0045
+/** ~1 mm (1 unit = 0.254 m): how far a moving print keeps clear of where it rested */
+const CLEAR = 0.004
 
 export interface PrintSpec {
   url: string
@@ -65,7 +69,7 @@ export function makePrints(specs: PrintSpec[], at: { stack: THREE.Vector3; pile:
       cardGeo,
       new THREE.MeshStandardMaterial({ color: '#f1ebe0', roughness: 0.62, transparent: true, envMapIntensity: 0.6 }),
     )
-    card.scale.set(w, 0.0045, h)
+    card.scale.set(w, THICK, h)
     card.castShadow = true
     card.receiveShadow = true
     const photo = new THREE.Mesh(
@@ -91,6 +95,26 @@ export function makePrints(specs: PrintSpec[], at: { stack: THREE.Vector3; pile:
   const Pa = new THREE.Vector3()
   const Pb = new THREE.Vector3()
   const E = new THREE.Euler()
+  const Q = new THREE.Quaternion()
+  const V = new THREE.Vector3()
+  /** the card's lowest corner below the group origin (its top face centre) in the current pose */
+  const lowest = (g: THREE.Group, w: number, h: number) => {
+    Q.setFromEuler(g.rotation)
+    let m = Infinity
+    for (const sx of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) for (const y of [0, -THICK]) m = Math.min(m, V.set(sx * w, y, sz * h).applyQuaternion(Q).y)
+    return m
+  }
+  /**
+   * A print turns about its centre, so as it tips up its near edge swings DOWN
+   * (and a yawed or rolled corner further) faster than the arc lifts it: keep
+   * its lowest corner at or above where it rests (the gatefold, the print
+   * under it), plus `CLEAR` once it's moving. 0 once it's clear of the album.
+   */
+  const keepAbove = (g: THREE.Group, w: number, h: number, restY: number, away: number) => {
+    const floor = restY - THICK + CLEAR * smoothstep(0, 0.08, away)
+    const low = g.position.y + lowest(g, w, h)
+    if (low < floor) g.position.y += floor - low
+  }
 
   return {
     group,
@@ -130,12 +154,12 @@ export function makePrints(specs: PrintSpec[], at: { stack: THREE.Vector3; pile:
         const up = k === 0 ? 1 : ease.inOutCubic(smoothstep(0, 1, s - (k - 1)))
         const down = ease.inOutCubic(smoothstep(0, 1, s - k))
         // stack pose (k = 0 on top)
-        const stackY = (n - 1 - k) * GAP + 0.0045
+        const stackY = (n - 1 - k) * GAP + THICK
         Pa.set(at.stack.x, at.stack.y + stackY, at.stack.z)
         const stackRot = stackYaw[k % stackYaw.length]
         // pile pose (the earliest print at the bottom)
         const po = pileOff[k % pileOff.length]
-        Pb.set(at.pile.x + po[0], at.pile.y + k * GAP + 0.0045, at.pile.z + po[1])
+        Pb.set(at.pile.x + po[0], at.pile.y + k * GAP + THICK, at.pile.z + po[1])
         const pileRot = pileYaw[k % pileYaw.length]
         if (down <= 0) {
           // stack → presented: rise, drift over, turn up
@@ -143,6 +167,7 @@ export function makePrints(specs: PrintSpec[], at: { stack: THREE.Vector3; pile:
           const arc = Math.sin(t * Math.PI) * 0.12
           g.position.set(lerp(Pa.x, at.present.x, t), lerp(Pa.y, at.present.y, t) + arc, lerp(Pa.z, at.present.z, t))
           g.rotation.copy(E.set(tilt * ease.outCubic(t), lerp(stackRot, 0, t), 0))
+          keepAbove(g, pr.w, pr.h, Pa.y, t)
         } else {
           // presented → pile: tip down and slide left, landing flat with a small settle
           const t = down
@@ -150,6 +175,7 @@ export function makePrints(specs: PrintSpec[], at: { stack: THREE.Vector3; pile:
           const land = t > 0.85 ? Math.sin(((t - 0.85) / 0.15) * Math.PI) * 0.01 : 0
           g.position.set(lerp(at.present.x, Pb.x, t), lerp(at.present.y, Pb.y, t) + arc + land, lerp(at.present.z, Pb.z, t))
           g.rotation.copy(E.set(tilt * (1 - ease.inOutCubic(t)), lerp(0, pileRot, t), Math.sin(t * Math.PI) * 0.12))
+          keepAbove(g, pr.w, pr.h, Pb.y, 1 - t)
         }
       }
     },

@@ -89,7 +89,8 @@ export async function makeKitchenRoom(o: KitchenRoomOpts): Promise<KitchenRoom> 
   await nextFrame()
 
   // ref4's record column behind the Sweets bin: one Glory LP face-out under a cage bulb
-  const cover = coverTexture({ title: SECTIONS.kitchen.title, kicker: `${BRAND.short} · ${SECTIONS.kitchen.eyebrow}`, cat: catNo(40), paper: 'red' }, mobile ? 512 : 1024)
+  // (it's ≤ ~200 px tall in the end beat: 512 is ~1:1 at DPR 2)
+  const cover = coverTexture({ title: SECTIONS.kitchen.title, kicker: `${BRAND.short} · ${SECTIONS.kitchen.eyebrow}`, cat: catNo(40), paper: 'red' }, mobile ? 384 : 512)
   const col = makeRecordColumn({ scale: U, mobile, cover, turntable: false, hifi: false, height: 3.2, seed: 3 })
   col.group.position.set(o.columnX, FLOOR_Y, WALL_Z)
   group.add(col.group)

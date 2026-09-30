@@ -64,10 +64,15 @@ import { old1837, type ChalkSpec, type PaintLine } from './textures'
  * is unchanged.
  *
  * INIT: the maps are procedural (walnut 1024², the LP atlas, painted brick…),
- * built once per page. Call `await prepareRoom({ backBar: {} })` first in an
- * async init: it builds them in slices across frames (~0.45 s total on a
- * laptop, no long task); the makers after it are then ~50 ms. Without it the
- * first maker builds them synchronously.
+ * built once per page; phones get half-size maps (walnut/atlas 512², brick
+ * ≤ 512 px — a quarter of the work and memory, the same wall in metres).
+ * Call `await prepareRoom({ backBar: {} })` first in an async init: the heavy
+ * per-pixel maps (walnut, galvanized sheet, painted brick) are built in a
+ * WORKER (textures.ts; ~8 ms main-thread slices where a worker can't start),
+ * the light canvases a frame apart — no long task; the makers after it are
+ * then ~50 ms. Prefetch your own brick panels with brickPanelMapsAsync().
+ * Without it the first maker builds them synchronously. Chalkboards draw
+ * once their face is in and free their canvas after upload.
  *
  * LIGHT: the kit is lit by the world (env reflections, fill, your spot/rims)
  * PLUS its own "pools": fake point lights evaluated only in the kit's
@@ -98,7 +103,7 @@ import { old1837, type ChalkSpec, type PaintLine } from './textures'
  *     anchors: counter, counterFront, turntable, receiver, sleeve, brick,
  *     paint, records, singles, bottles, glass, tv, sconceA/B/C, pendant,
  *     bayGlass, bayBrick, bayRecords, left, right, top
- *  makeRecordColumn({ cover, lean, columnWidth, records, singles, bottles, hifi, turntable, sconce })
+ *  makeRecordColumn({ cover, stackCover, lean, columnWidth, records, singles, bottles, hifi, turntable, sconce })
  *     ref4 (x ∈ [−1.5, 1.6], a 0.42 m column). anchors: ledge, ledgeTop, sconce, records,
  *     singles, bottles, turntable, receiver, stack, counter, column
  *  makeCeiling({ width, depth, height, ducts: [{ pts, shape, size, radius }], pendants: [{ x, z, drop }], beams })
@@ -155,7 +160,7 @@ import { old1837, type ChalkSpec, type PaintLine } from './textures'
 
 export { makeBackBar, makeRecordColumn, makeCeiling, makeBarRun, makeChalkboards, tapBoards, houseCover, assemble, prepareRoom } from './compose'
 export type { RoomKit, KitOpts, BackBarOpts, RecordColumnOpts, CeilingOpts, BarRunOpts, ChalkWallOpts } from './compose'
-export { old1837, walnutMaps, walnutMapsAsync, brickCanvas, brickPanelMaps, brickPanelMapsAsync, spineAtlas, galvMaps, WALNUT_TILE, WALNUT_ALONG } from './textures'
+export { old1837, walnutMaps, walnutMapsAsync, brickCanvas, brickPanelMaps, brickPanelMapsAsync, spineAtlas, galvMaps, galvMapsAsync, fillTracked, measureTracked, MAP_MAX, WALNUT_TILE, WALNUT_ALONG } from './textures'
 export type { PaintLine, ChalkSpec, PbrMaps } from './textures'
 export { PoolSet, withPools, kitPools, MAX_POOLS } from './materials'
 export { leanOnWall } from './pieces'
@@ -286,7 +291,7 @@ export function ductRun(length = 4, o: KitOpts & { radius?: number; ceilingY?: n
   })
 }
 
-/** one tall chalkboard in a walnut frame (legible chalk only from `spec`) */
+/** one tall chalkboard in a pale wood frame (legible chalk only from `spec`) */
 export function chalkboard(w = 0.62, h = 1.25, spec: ChalkSpec = {}, o: KitOpts = {}): RoomKit {
   return assemble(o, c => {
     addChalkboard(c, w, h, spec)

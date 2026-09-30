@@ -728,6 +728,76 @@
   }
 }
 
+/* ---------------- narrow phones (< 375 px: 360, 344, 320) ----------------
+   Eight pips and the side break need ~230 px of plate: beside the stacked
+   Sound / Motion switches that only fits from 375 px up (at 360 A1 spilled
+   out of its plate and the title was cut; at 320 two pips sat on the Motion
+   switch). Here the readout takes the full width between the gutters and the
+   two switches sit in one row above it. The band stays inside --safe-bottom
+   (96 px on portrait phones) with air to spare: 8 + 26 + 3 + 52 = 89. */
+@media (max-width: 374px) {
+  .ch-bottom {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+  }
+  .ch-prefs {
+    flex-direction: row;
+    align-items: center;
+  }
+  .ch-tgl {
+    height: 26px;
+  }
+  .ch-read {
+    align-items: stretch;
+    gap: 2px;
+    padding: 5px 8px 0 10px;
+  }
+  .ch-read-line {
+    padding-right: 0;
+  }
+  /* the tracklist spreads across the plate: each pip gets an equal share (≥ 26 px) */
+  .ch-rail {
+    margin-bottom: 2px;
+  }
+  .ch-rail li {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .ch-rail li.ch-side-b {
+    margin-left: 4px;
+    padding-left: 4px;
+  }
+  .ch-pip {
+    width: 100%;
+    min-width: 26px;
+    height: 26px;
+  }
+  /* the first tag hangs right of its pip, as the last one hangs left: both stay on screen */
+  .ch-rail li:first-child .ch-tag {
+    left: -6px;
+    transform: none;
+  }
+}
+
+/* ---------------- a phone keyboard is up ----------------
+   chrome.ts sets html.ui-typing while a text field of the event form has
+   focus. On a short touch viewport (an Android keyboard resizes the page to
+   ~460 px on a 390 x 844 phone) the bottom band — Sound · Motion and the
+   tracklist — steps aside and the docked form takes its room: the dock is
+   bounded by --safe-bottom, so it gets a slimmer one of its own. Focus
+   leaving the field (the keyboard closing) brings the band back. */
+@media (max-height: 560px) and (pointer: coarse) {
+  html.ui-typing .ch-bottom,
+  html.ui-typing .ch-scrim--bot {
+    visibility: hidden;
+  }
+  html.ui-typing .gef-dock {
+    --safe-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 /* ---------------- the loader: side A, needle down (loader.ts) ---------------- */
 .ld {
   position: absolute;
@@ -1130,6 +1200,11 @@ html.no-webgl #track {
   color: var(--ui-cream);
   text-underline-offset: 5px;
   text-decoration-color: rgba(240, 165, 58, 0.7);
+}
+/* Bar / Kitchen leave for the printable menu: the chrome's small ↗ */
+.fb-nav .fb-ext .ch-ext {
+  margin-left: 5px;
+  vertical-align: 1px;
 }
 .fb-nav .fb-cta,
 .fallback-copy a.fb-pill {

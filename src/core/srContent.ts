@@ -39,7 +39,7 @@ const COPY: Record<string, () => string> = {
     <h1 tabindex="0">${esc(BRAND.name)}</h1>
     <p>${esc(BRAND.tagline)}</p>
     <p>${esc(BRAND.street)}, ${esc(BRAND.city)}</p>
-    <p>${ext(LINKS.reserve.url, LINKS.reserve.label)} · <a href="#kitchen" data-land="kitchen">See the menu</a> · <a href="#taps" data-land="taps">What’s on tap</a></p>`,
+    <p>${ext(LINKS.reserve.url, LINKS.reserve.label)} · ${ext(LINKS.menus.url, 'See the menu')} · <a href="#taps" data-land="taps">What’s on tap</a></p>`,
 
   taps: () => `
     <p>${esc(SECTIONS.taps.eyebrow)}</p>
@@ -89,7 +89,7 @@ const COPY: Record<string, () => string> = {
     <p>${esc(SECTIONS.events.eyebrow)}</p>
     <h2 tabindex="0">${esc(EVENTS.title)}</h2>
     ${EVENTS.body.map((b, i) => (i === 0 ? `<p>${stop('events', 0, b)}</p>` : `<p>${esc(b)}</p>`)).join('')}
-    <p>${ext(LINKS.events.url, LINKS.events.label)}</p>
+    <p>${ext(LINKS.events.url, LINKS.events.label, 0)}</p>
     <div class="event-form-mount" data-event-form data-anchor="1"></div>`,
 
   visit: () => `

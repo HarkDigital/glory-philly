@@ -50,8 +50,8 @@ import { publishTextures } from './texture'
 
 /** the primary nav on desktop (business names, in story order) */
 const NAV = ['taps', 'kitchen', 'events', 'visit']
-/** nav items that open gloryphilly.com's printable menu instead of landing on their chapter (Mike, 2026-09-30) */
-const MENU_LINKS: Record<string, string> = { taps: 'Bar menu', kitchen: 'Kitchen menu' }
+/** nav items that open gloryphilly.com's printable menu instead of landing on their chapter (Mike, 2026-09-30; the fallback page's header too) */
+export const MENU_LINKS: Record<string, string> = { taps: 'Bar menu', kitchen: 'Kitchen menu' }
 /** the story as a record's tracklist: side A is the first half (rounded up), side B the rest — A1 … A4, B1 … B3 */
 export const trackCode = (i: number, total: number) => {
   const a = Math.ceil(total / 2)
@@ -77,15 +77,27 @@ export function hoursSummary() {
 /* glyphs (decorative) */
 const MENU_IC = `<svg class="ch-ic" viewBox="0 0 20 14" aria-hidden="true" focusable="false"><path d="M1 2h18M1 7h18M1 12h12"/></svg>`
 const CLOSE_IC = `<svg class="ch-ic" viewBox="0 0 20 14" aria-hidden="true" focusable="false"><path d="M5 1.5l10 11M15 1.5l-10 11"/></svg>`
-const EXT_IC = `<svg class="ch-ext" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M4 2h6v6M10 2L3 9"/></svg>`
+export const EXT_IC = `<svg class="ch-ext" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M4 2h6v6M10 2L3 9"/></svg>`
 const NEW_TAB = `<span class="sr-only"> (opens in a new tab)</span>`
 
 export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
+  const html = document.documentElement
   const slots = engine.slots
   const total = slots.length
   const indexOf = (id: string) => slots.findIndex(s => s.def.id === id)
   const biz = (id: string, fallback = '') => NAV_NAMES[id] ?? fallback
   const first = slots[0]?.def.id ?? 'hero'
+  /** the chapter's label, when it says more than its business name (never "City Wide (City Wide)") */
+  const extra = (i: number) => {
+    const d = slots[i].def
+    return biz(d.id, d.label) === d.label ? '' : d.label
+  }
+  /** "A3: City Wide (City Wide Special)" — pips */
+  const pipName = (i: number) => {
+    const d = slots[i].def
+    const x = extra(i)
+    return `${trackCode(i, total)}: ${biz(d.id, d.label)}${x ? ` (${x})` : ''}`
+  }
 
   // the rotate card (and the opaque menu) cover the picture: pause it
   // (engine.paused) while either is up — a counted hold, so both can overlap
@@ -115,7 +127,7 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   const pips = slots
     .map(
       (s, i) =>
-        `<li${i === sideA ? ' class="ch-side-b"' : ''}><button type="button" class="ch-pip" data-go="${s.def.id}" aria-label="${trackCode(i, total)}: ${esc(biz(s.def.id, s.def.label))} (${esc(s.def.label)})"><span class="ch-trk" aria-hidden="true">${trackCode(i, total)}</span><span class="ch-tag" aria-hidden="true">${esc(biz(s.def.id, s.def.label))}</span></button></li>`,
+        `<li${i === sideA ? ' class="ch-side-b"' : ''}><button type="button" class="ch-pip" data-go="${s.def.id}" aria-label="${esc(pipName(i))}"><span class="ch-trk" aria-hidden="true">${trackCode(i, total)}</span><span class="ch-tag" aria-hidden="true">${esc(biz(s.def.id, s.def.label))}</span></button></li>`,
     )
     .join('')
 
@@ -127,7 +139,7 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
           <span class="ch-ml-lab" aria-hidden="true">${esc(MENU_LINKS[s.def.id] ?? s.def.label)}</span>`
       return MENU_LINKS[s.def.id]
         ? `<li>${menuLink(s.def.id, 'ch-ml', inner)}</li>`
-        : `<li><a class="ch-ml" href="#${s.def.id}" data-go="${s.def.id}" aria-label="${esc(biz(s.def.id, s.def.label))}, ${trackCode(i, total)}: ${esc(s.def.label)}">${inner}
+        : `<li><a class="ch-ml" href="#${s.def.id}" data-go="${s.def.id}" aria-label="${esc(biz(s.def.id, s.def.label))}, ${trackCode(i, total)}${extra(i) ? `: ${esc(extra(i))}` : ''}">${inner}
         </a></li>`
     })
     .join('')
@@ -209,7 +221,7 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   let announceFor: string | null = null
   const say = (i: number) => {
     const d = slots[i]?.def
-    if (d) status.textContent = `${trackCode(i, total)}: ${biz(d.id, d.label)}, ${d.label}`
+    if (d) status.textContent = `${trackCode(i, total)}: ${biz(d.id, d.label)}${extra(i) ? `, ${extra(i)}` : ''}`
   }
 
   // ---------------------------------------------------------------- navigation
@@ -296,8 +308,12 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
     // the menu is opaque: hold the frame once it has covered the picture
     menuTimer = window.setTimeout(() => menuOpen && holdScene('menu'), calmUi() ? 0 : 320)
     menu.scrollTop = 0
-    const now = menuLinks[lastIndex] ?? menuLinks[0]
-    now?.focus({ preventScroll: true })
+    // focus the chapter on screen — unless its row leaves the site (Bar / Kitchen
+    // open gloryphilly.com's menu in a new tab): an Enter out of habit must not
+    // leave, so Close takes focus there (Tab goes on to the first chapter)
+    const now = menuLinks[lastIndex]
+    if (now && !now.hasAttribute('data-menu-link')) now.focus({ preventScroll: true })
+    else menuClose.focus({ preventScroll: true })
     sound.blip(2)
   }
   const closeMenu = (restoreFocus = true) => {
@@ -345,7 +361,23 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   if (typeof wide.addEventListener === 'function') wide.addEventListener('change', onWide)
   else wide.addListener?.(onWide)
   // the static page took over (no GPU): let go of everything the menu held
-  window.addEventListener('hark:fallback', () => closeMenu(false))
+  window.addEventListener('hark:fallback', () => {
+    closeMenu(false)
+    html.classList.remove('ui-typing')
+  })
+
+  // ------------------------------------------------------ a phone keyboard
+  // html.ui-typing while a text field outside the chrome has focus (the event
+  // inquiry form). On a short touch viewport — a phone keyboard is up — ui.css
+  // then gives the bottom band (Sound · Motion + the tracklist) to the form.
+  const TEXT = /^(text|email|tel|url|search|number|password|date|datetime-local|month|week|time)$/
+  const typing = (t: EventTarget | null) =>
+    t instanceof HTMLElement &&
+    !root.contains(t) &&
+    (t instanceof HTMLTextAreaElement || (t instanceof HTMLInputElement && TEXT.test(t.type)) || t.isContentEditable)
+  document.addEventListener('focusin', e => html.classList.toggle('ui-typing', typing(e.target)))
+  // focus moving field → field keeps it (relatedTarget); leaving the form, or the window, drops it
+  document.addEventListener('focusout', e => html.classList.toggle('ui-typing', typing(e.relatedTarget)))
 
   // -------------------------------------------------------------------- update
 
@@ -377,9 +409,12 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
         if (on) a.setAttribute('aria-current', 'location')
         else a.removeAttribute('aria-current')
       })
+      // like the desktop nav: only in-page rows mark the chapter on screen (an
+      // external link is never "the current location")
       menuLinks.forEach((a, i) => {
-        a.classList.toggle('is-on', i === state.index)
-        if (i === state.index) a.setAttribute('aria-current', 'location')
+        const on = i === state.index && !a.hasAttribute('data-menu-link')
+        a.classList.toggle('is-on', on)
+        if (on) a.setAttribute('aria-current', 'location')
         else a.removeAttribute('aria-current')
       })
       ch.dataset.chapter = id

@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { onFonts, type Sleeve } from '../vinyl'
 import { kitPools, poolHook, withPools, type RoomMaterials } from './materials'
-import { brickPanelMaps, drawChalk, hifiMaps, pitchTexture, SPINES, COVERS, type ChalkSpec, type PaintLine } from './textures'
+import { brickPanelMaps, chalkFontReady, drawChalk, hifiMaps, pitchTexture, SPINES, COVERS, type ChalkSpec, type PaintLine } from './textures'
 import { RoomBuilder, canvas, clamp, lerp, plankBox, texFrom, type Rng } from './util'
 
 /*
@@ -30,6 +30,11 @@ const EPS = 0.004
 /** a walnut box (planks at real scale; `vertical` turns the boards on the faces) */
 export function wood(c: Ctx, w: number, h: number, d: number, x: number, y: number, z: number, { vertical = false, tile = 1.2 } = {}) {
   c.b.merge(plankBox(w, h, d, { vertical, tile, ou: c.r() * 7, ov: c.r() * 7 }), c.M.walnut, T(x, y, z))
+}
+
+/** a pale natural-wood box (the chalkboard frames, ref6): fine grain at real scale, along x (or up, `vertical`) */
+export function paleWood(c: Ctx, w: number, h: number, d: number, x: number, y: number, z: number, { vertical = false } = {}) {
+  c.b.merge(plankBox(w, h, d, { vertical, tile: 0.3, ou: c.r() * 7, ov: c.r() * 7 }), c.M.maple, T(x, y, z))
 }
 
 /** a plain box in any kit material, centred at (x, y, z) */
@@ -158,7 +163,15 @@ export interface RecordRowOpts {
   dividers?: boolean
   /** 0..1 how full (leaves a loose, leaning end) */
   fill?: number
+  /**
+   * the clear height over the shelf top (to the underside of the board
+   * above): every sleeve and divider, leaning or not, is kept 2 mm under it
+   */
+  maxH?: number
 }
+
+/** a black divider card: a touch taller than the sleeves (so it reads), still under a 0.333 m clear row */
+const DIVIDER_H = 0.326
 
 /**
  * A shelf row PACKED with records, spines out: runs of parallel sleeves (some
@@ -179,7 +192,7 @@ export function addRecordRow(c: Ctx, o: RecordRowOpts) {
     const div = !singles && o.dividers !== false && sinceDiv > 22 && r() < 0.08
     if (div) {
       sinceDiv = 0
-      return { t: 0.0016, h: 0.334, d: 0.3, div: true }
+      return { t: 0.0016, h: DIVIDER_H, d: 0.3, div: true }
     }
     sinceDiv++
     if (singles) return { t: lerp(0.0022, 0.0034, r()), h: 0.181, d: 0.181, div: false }
@@ -197,7 +210,10 @@ export function addRecordRow(c: Ctx, o: RecordRowOpts) {
       for (let attempt = 0; attempt < 2 && !placedOk; attempt++) {
         const phi = -theta
         const lift = (s.t / 2) * Math.abs(Math.sin(phi)) + 0.0006
-        const poly = rectPoly(s.t, s.h, phi, 0, o.y + lift)
+        // never up into the board above: the top corner (lift + h·cos φ + t/2·|sin φ|) keeps 2 mm under it
+        const hMax = ((o.maxH ?? Infinity) - 0.002 - lift - (s.t / 2) * Math.abs(Math.sin(phi))) / Math.cos(phi)
+        const h = Math.min(s.h, hMax)
+        const poly = rectPoly(s.t, h, phi, 0, o.y + lift)
         let dx = o.x0 + EPS - Math.min(...poly.map(p => p[0]))
         for (let j = Math.max(0, placed.length - 10); j < placed.length; j++) dx = Math.max(dx, shiftRightOf(placed[j], poly, 0.0004 + (k === 0 ? gapExtra : 0)))
         const maxX = Math.max(...poly.map(p => p[0])) + dx
@@ -218,7 +234,7 @@ export function addRecordRow(c: Ctx, o: RecordRowOpts) {
         const m = new THREE.Matrix4()
           .makeTranslation(dx, o.y + lift, zc)
           .multiply(new THREE.Matrix4().makeRotationZ(phi))
-          .multiply(new THREE.Matrix4().makeScale(s.t, s.h, s.d))
+          .multiply(new THREE.Matrix4().makeScale(s.t, h, s.d))
         const tint = s.div ? 0.06 : lerp(0.72, 1.06, r())
         const warm = lerp(-0.04, 0.04, r())
         c.b.instance('records', recordGeometry, c.M.records, m, {
@@ -247,7 +263,8 @@ export function addRecordShelf(c: Ctx, x0: number, x1: number, { y = 0, z = 0, r
   for (let i = 0; i < rows; i++) {
     const yy = y + i * pitch
     addShelf(c, w, depth, { x: cx, y: yy, z, thick: th })
-    addRecordRow(c, { x0: x0 + (sides ? side : 0), x1: x1 - (sides ? side : 0), y: yy, zBack: z, depth, singles, fill: i === rows - 1 ? 0.97 : 1 })
+    // (the top row's clear height assumes a board over it too: `top`, or the caller's own shelf)
+    addRecordRow(c, { x0: x0 + (sides ? side : 0), x1: x1 - (sides ? side : 0), y: yy, zBack: z, depth, singles, fill: i === rows - 1 ? 0.97 : 1, maxH: pitch - th })
   }
   // the top board sits at y + rows·pitch; without it the sides stop under the next shelf (the caller's)
   if (top) addShelf(c, w, depth, { x: cx, y: y + rows * pitch, z, thick: th })
@@ -428,15 +445,18 @@ function bottleGeometry(sh: BottleShape, segs: number) {
   return g
 }
 
+/** how far a pour spout's tip stands above the bottle's lip (the cork sits 12 mm down the neck) */
+const SPOUT_PROUD = 0.058
+
 function spoutGeometry() {
   const cork = new THREE.CylinderGeometry(0.0092, 0.0118, 0.024, 12, 1)
   cork.translate(0, 0.004, 0)
-  // a long tapered speed spout, kinked forward at the tip
+  // a short tapered speed spout, kinked forward at the tip (ref4: ≈ 1/8 of the bottle, not a third)
   const path = new THREE.CatmullRomCurve3([
     new THREE.Vector3(0, 0.012, 0),
-    new THREE.Vector3(0, 0.06, 0),
-    new THREE.Vector3(0, 0.088, 0.006),
-    new THREE.Vector3(0, 0.104, 0.022),
+    new THREE.Vector3(0, 0.045, 0),
+    new THREE.Vector3(0, 0.058, 0.004),
+    new THREE.Vector3(0, 0.066, 0.014),
   ])
   const tube = new THREE.TubeGeometry(path, 12, 0.0036, 8, false)
   {
@@ -473,15 +493,23 @@ function spoutGeometry() {
   return g
 }
 
+/** coloured glass (the liquid reads through it): ambers, browns, the odd green */
 const LIQUORS = ['#6a3208', '#7d420f', '#4a1f06', '#a3601f', '#8a5018', '#3c4441', '#4a5350', '#23401f', '#551209', '#2e2012', '#b07a2a', '#5a2a0a', '#6a3a14']
+/**
+ * what CLEAR glass holds (ref1/ref4: most of the rail is clear spirits): water-white
+ * vodka/gin/blanco, pale straw, whiskey and rum ambers, a gold liqueur
+ */
+const SPIRITS = ['#e2dccb', '#d8d2c0', '#cfd3cc', '#e4e2d6', '#dcd6c2', '#d9c48e', '#c07a2a', '#a8601c', '#b8742a', '#8a4512', '#c9a94a']
 const LABELS = ['#e3d8bf', '#ece8de', '#1d1a17', '#a88c62', '#7c2a22', '#26303f', '#d6ccb2', '#2a2622', '#c2a25c', '#efe6d2', '#e0d6c0']
+const fract = (v: number) => v - Math.floor(v)
 
 /**
  * One row of bottles along x (centres from x0 to x1) on a surface at y,
  * centred at depth z (± jitter within `slack`). spout: chance of a chrome
- * pour spout. Returns the count.
+ * pour spout. clear: share of clear-glass bottles (their liquid shows its own
+ * colour below the fill line; above it the glass is clear). Returns the count.
  */
-export function addBottleRow(c: Ctx, x0: number, x1: number, { y = 0, z = 0, slack = 0.01, spout = 0.8, tall = 1, maxH = Infinity } = {}) {
+export function addBottleRow(c: Ctx, x0: number, x1: number, { y = 0, z = 0, slack = 0.01, spout = 0.8, tall = 1, maxH = Infinity, clear = 0.4 } = {}) {
   const r = c.r
   const segs = c.mobile ? 12 : 18
   let x = x0
@@ -503,13 +531,17 @@ export function addBottleRow(c: Ctx, x0: number, x1: number, { y = 0, z = 0, sla
       .makeTranslation(cx, y + 0.0005, z + zj)
       .multiply(new THREE.Matrix4().makeRotationY(yaw))
       .multiply(new THREE.Matrix4().makeScale(s, s, s))
-    const glass = new THREE.Color(LIQUORS[Math.floor(r() * LIQUORS.length)])
+    // (one draw decides the glass and what's in it, so the rows keep their layout)
+    const gi = r()
+    const isClear = fract(gi * 7.31 + 0.13) < clear
+    const glass = new THREE.Color(isClear ? SPIRITS[Math.floor(fract(gi * 13.7) * SPIRITS.length)] : LIQUORS[Math.floor(gi * LIQUORS.length)])
     const label = new THREE.Color(LABELS[Math.floor(r() * LABELS.length)])
-    // a spout only where it clears the shelf above (it stands ~9 cm proud of the lip)
-    const spouted = r() < spout && sh.h * s + 0.1 < maxH - 0.008
+    // a spout only where it clears the shelf above (its tip stands SPOUT_PROUD over the lip)
+    const spouted = r() < spout && sh.h * s + SPOUT_PROUD + 0.004 < maxH - 0.008
     c.b.instance(`bottle${si}`, () => bottleGeometry(sh, segs), c.M.bottles, m, {
       attrs: {
         aGlass: [glass.r, glass.g, glass.b],
+        aClear: isClear ? 1 : 0,
         aLabel: [label.r, label.g, label.b],
         aSeed: (spouted ? -1 : 1) * (0.1 + r()),
         aFill: sh.h * lerp(0.28, 0.9, r()),
@@ -881,7 +913,7 @@ export function addDuctTrunk(
 // ─── chalkboards ────────────────────────────────────────────────────────────
 
 /**
- * A tall black chalkboard in a walnut frame (ref1/ref6), hung on the wall
+ * A tall black chalkboard in a pale natural-wood frame (ref6), hung on the wall
  * (z = 0) with its bottom at y. Legible chalk comes only from `spec`.
  */
 export function addChalkboard(c: Ctx, w: number, h: number, spec: ChalkSpec, { x = 0, y = 0, z = 0 } = {}) {
@@ -889,21 +921,38 @@ export function addChalkboard(c: Ctx, w: number, h: number, spec: ChalkSpec, { x
   const W = res
   const H = Math.round((res * h) / w)
   const { cv, g } = canvas(W, H)
+  // the bare slate until the chalk face is in
+  g.fillStyle = '#131514'
+  g.fillRect(0, 0, W, H)
   const map = texFrom(cv, { repeat: false, free: false })
+  // drawn ONCE with the face in (not again on every font event), then the
+  // canvas is freed as soon as it's on the GPU
+  let done = false
   const draw = () => {
+    if (done) return
+    if (cv.width !== W || cv.height !== H) {
+      cv.width = W
+      cv.height = H
+    }
     drawChalk(g, W, H, spec)
     map.needsUpdate = true
+    if ((done = chalkFontReady()))
+      map.onUpdate = () => {
+        cv.width = cv.height = 1
+        map.onUpdate = null
+      }
   }
-  draw()
-  onFonts(draw)
+  if (chalkFontReady()) draw()
+  else onFonts(draw)
   const mat = kitPools(new THREE.MeshStandardMaterial({ map, roughness: 0.92, envMapIntensity: 0.25 }), c.M.pools, 'chalk')
   c.owned.push(map, mat)
   const f = 0.045
   c.b.merge(new THREE.PlaneGeometry(w, h), mat, T(x, y + h / 2, z + 0.012))
   box(c, c.M.steel, w, h, 0.01, x, y + h / 2, z + 0.005)
-  wood(c, w + 2 * f, f, 0.026, x, y + h + f / 2, z + 0.013)
-  wood(c, w + 2 * f, f, 0.026, x, y - f / 2, z + 0.013)
-  for (const s of [-1, 1]) wood(c, f, h, 0.026, x + s * (w / 2 + f / 2), y + h / 2, z + 0.013, { vertical: true })
+  // the frame: pale natural wood, as on the real tap boards (ref6) — it pops on the black wall
+  paleWood(c, w + 2 * f, f, 0.026, x, y + h + f / 2, z + 0.013)
+  paleWood(c, w + 2 * f, f, 0.026, x, y - f / 2, z + 0.013)
+  for (const s of [-1, 1]) paleWood(c, f, h, 0.026, x + s * (w / 2 + f / 2), y + h / 2, z + 0.013, { vertical: true })
 }
 
 // ─── hi-fi, TV ──────────────────────────────────────────────────────────────

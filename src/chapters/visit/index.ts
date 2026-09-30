@@ -17,7 +17,6 @@ import {
   WIN,
   SIGN,
   STREET_Z,
-  drawSign,
   makeFloor,
   makeCoaster,
   makeRoom,
@@ -25,8 +24,10 @@ import {
   makeStreet,
   makeVotive,
   makeWindow,
+  paintSign,
   placeConsoleTop,
   prepareVisitRoom,
+  type Sign,
   type VisitRoom,
 } from './scene'
 import './visit.css'
@@ -39,8 +40,9 @@ import './visit.css'
  * wire-cage sconces, the black ceiling with its silver duct and a cage
  * pendant). Glory's tall black-framed window onto cobbled Chestnut Street
  * (warm brick facades out of focus, a lantern, a lit bay window, now and
- * then a car's lights sliding past), a clad column beside it; the painted
- * wall sign on the exposed brick bay (ref5); under the sign an ebonised
+ * then a car's lights sliding past), in a black-painted bay like ref5's (the
+ * pier beside it carries a cage sconce); the painted wall sign on the exposed
+ * brick bay (ref5); under the sign an ebonised
  * record console packed with LPs, a walnut deck on it playing "Last Call"
  * (GLY-007), its sleeve propped against the brick behind, back out (Side A ·
  * Hours / Side B · Visit — decorative; the DOM card is the readable copy);
@@ -54,7 +56,7 @@ import './visit.css'
  *   0.14–0.30  the platter winds down from 33⅓ to a stop
  *   0.15–0.27  the tonearm swings back to its rest; 0.27–0.31 it lowers onto it
  *   0.00–0.34  the camera pulls back and up to the whole front: the duct
- *              under the black ceiling, the sign, the column + sconce, the
+ *              under the black ceiling, the sign, the pier + sconce, the
  *              window + pendant, the pint, the LPs in the console
  *   0.10–0.30  the warm rim eases in with the pull-back (on the close-up it
  *              would flood the deck's plinth)
@@ -178,8 +180,9 @@ export default function create(): Chapter {
   const floor = makeFloor()
   const win = makeWindow()
   const street = makeStreet()
-  const sign = makeSign()
-  // the sill: from the clad column across the window, its far end let into the walnut
+  // the painted wall sign: made in init (its canvas is half size on phones)
+  let sign: Sign | null = null
+  // the sill: from the black-painted pier across the window, its far end let into the painted wall
   const sillX0 = COL_B.x1
   const sillX1 = WIN.x1 + 0.25
   const sill = makeBarTop({ length: sillX1 - sillX0, depth: 1.05, thickness: 0.14 })
@@ -198,7 +201,7 @@ export default function create(): Chapter {
   const votive = makeVotive()
   votive.group.position.set(3.55, WIN.y0, 0.42)
   votive.group.scale.setScalar(1.25)
-  group.add(floor, win.group, street.mesh, sign.mesh, sill, pint.group, coaster, votive.group)
+  group.add(floor, win.group, street.mesh, sill, pint.group, coaster, votive.group)
 
   pint.group.position.set(PINT.x, PINT.y + 0.012, PINT.z)
   coaster.position.set(PINT.x, PINT.y + 0.0125, PINT.z)
@@ -315,7 +318,10 @@ export default function create(): Chapter {
     const reach = block('vs-reach')
     const phone = el('a', 'vs-phone', BRAND.phone, reach)
     phone.href = BRAND.phoneHref
-    ext(reach, 'vs-addr', BRAND.mapUrl, `<span>${BRAND.street}, ${BRAND.city}</span>${ARROW}`)
+    // the arrow is glued to the address's last word, so a wrap never strands it
+    const addr = `${BRAND.street}, ${BRAND.city}`
+    const cut = addr.lastIndexOf(' ')
+    ext(reach, 'vs-addr', BRAND.mapUrl, `${addr.slice(0, cut + 1)}<span class="vs-nw">${addr.slice(cut + 1)}${ARROW}</span>`)
     const mail = el('a', 'vs-mail', BRAND.email, reach)
     mail.href = `mailto:${BRAND.email}`
 
@@ -379,6 +385,11 @@ export default function create(): Chapter {
 
     // measure where the card is (layout reads only on resize, never per frame)
     measureCard = () => {
+      // a card taller than its slot (only a huge text zoom now: visit.css fits
+      // every viewport) scrolls inside itself, and only then keeps the wheel
+      // from the story (Lenis), like the events inquiry form
+      if (card.scrollHeight > card.clientHeight + 1) card.setAttribute('data-lenis-prevent', '')
+      else card.removeAttribute('data-lenis-prevent')
       const r = card.getBoundingClientRect()
       const W = window.innerWidth
       const H = window.innerHeight
@@ -438,6 +449,8 @@ export default function create(): Chapter {
     async init(ctx: ChapterContext) {
       reduced = ctx.reducedMotion
       buildHud(ctx.stage)
+      sign = makeSign({ mobile: ctx.mobile })
+      group.add(sign.mesh)
       await nextFrame()
       // the room kit: maps across frames, then the room as one kit
       await prepareVisitRoom()
@@ -474,18 +487,10 @@ export default function create(): Chapter {
         ;(window as unknown as { __visitDebug?: object }).__visitDebug = { deck, lean, group, localBounds, boxGap }
       }
       await nextFrame()
-      // the painted sign: redraw once Alfa Slab One is really there
-      const redraw = () => {
-        drawSign(sign.canvas)
-        sign.tex.needsUpdate = true
-      }
-      if (document.fonts?.load) {
-        document.fonts
-          .load('400 120px "Alfa Slab One"')
-          .then(redraw)
-          .catch(() => {})
-        document.fonts.ready.then(redraw).catch(() => {})
-      }
+      // the painted sign: drawn once Alfa Slab One is really there (it usually
+      // is by now; a slow face gets a fallback draw after 1.5 s and one redraw),
+      // so the prewarm uploads the finished sign and its canvas is freed
+      await paintSign(sign)
       requestAnimationFrame(() => measureCard())
     },
 

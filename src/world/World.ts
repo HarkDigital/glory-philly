@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { Frame } from '../core/types'
+import { nextFrame } from '../core/yield'
 
 /*
  * The shared world for GLORY: a product film shot in a beer bar. Resonance's
@@ -24,7 +25,8 @@ import type { Frame } from '../core/types'
  *    rimBDir: x right, y up, z toward the camera — negative z is BEHIND the
  *    subject), colours rimA/rimB. Rims are what make glass and beer glow.
  *  - FILL: a low warm hemisphere.
- *  - ROOM REFLECTIONS (PMREM, built at construction): Glory's room as a
+ *  - ROOM REFLECTIONS (PMREM, built a frame after construction — so the
+ *    loader paints first — or on first use of `envMap`): Glory's room as a
  *    reflection — Edison pendants hanging from a black ceiling, the tall
  *    black-framed front windows on Chestnut Street (the long highlights on
  *    stainless and glass), the glowing back bar (a warm band at bar height),
@@ -425,8 +427,6 @@ const FRAG = /* glsl */ `
 
 export class World {
   object = new THREE.Group()
-  /** stage reflections (PMREM); materials may use it directly */
-  envMap: THREE.Texture
   spot: THREE.SpotLight
   rimA: THREE.DirectionalLight
   rimB: THREE.DirectionalLight
@@ -484,6 +484,8 @@ export class World {
     uMobile: { value: 0 },
     uRes: { value: new THREE.Vector2(1, 1) },
   }
+  private env: THREE.Texture | null = null
+  private renderer: THREE.WebGLRenderer | null
   private tmpC = new THREE.Color()
   private tmpV = new THREE.Vector3()
   private tmpQ = new THREE.Quaternion()
@@ -528,9 +530,33 @@ export class World {
     this.hemi = new THREE.HemisphereLight(0xffd6b0, 0x2a150b, WORLD_DEFAULTS.fill)
     this.object.add(this.hemi)
 
-    this.envMap = renderer ? buildStageEnv(renderer) : new THREE.Texture()
-    scene.environment = this.envMap
+    // the room reflections: built a frame from now, in two steps a frame apart (the
+    // loader paints before this ~0.1–0.5 s of PMREM work), unless a chapter's init or
+    // warmEnv() asks for them first — then they're built on the spot
+    this.renderer = renderer ?? null
     scene.environmentIntensity = WORLD_DEFAULTS.env
+    if (renderer) void this.buildEnvLater(renderer)
+    else this.setEnv(new THREE.Texture())
+  }
+
+  /** stage reflections (PMREM); materials may use it directly (built on first use if not yet) */
+  get envMap(): THREE.Texture {
+    if (!this.env) this.setEnv(this.renderer ? pmremEnv(this.renderer, stageEnvScene()) : new THREE.Texture())
+    return this.env!
+  }
+
+  private setEnv(t: THREE.Texture) {
+    this.env = t
+    this.scene.environment = t
+  }
+
+  private async buildEnvLater(renderer: THREE.WebGLRenderer) {
+    await nextFrame()
+    if (this.env) return
+    const env = stageEnvScene()
+    await nextFrame()
+    if (this.env) disposeEnvScene(env)
+    else this.setEnv(pmremEnv(renderer, env))
   }
 
   static defaults(): WorldParams {
@@ -662,7 +688,7 @@ export class World {
  * each column, a warm floor. Energy is kept close to the old studio so every
  * chapter's glass and steel still read.
  */
-function buildStageEnv(renderer: THREE.WebGLRenderer): THREE.Texture {
+function stageEnvScene(): THREE.Scene {
   const env = new THREE.Scene()
   const room = new THREE.Mesh(new THREE.SphereGeometry(40, 48, 24), new THREE.MeshBasicMaterial({ map: roomEnvMap(), side: THREE.BackSide }))
   env.add(room)
@@ -741,10 +767,19 @@ function buildStageEnv(renderer: THREE.WebGLRenderer): THREE.Texture {
   floor.rotation.x = -Math.PI / 2
   floor.position.y = -8
   env.add(floor)
+  return env
+}
 
+/** the env scene → a PMREM texture (the scene is disposed) */
+function pmremEnv(renderer: THREE.WebGLRenderer, env: THREE.Scene): THREE.Texture {
   const pmrem = new THREE.PMREMGenerator(renderer)
   const rt = pmrem.fromScene(env, 0.02)
   pmrem.dispose()
+  disposeEnvScene(env)
+  return rt.texture
+}
+
+function disposeEnvScene(env: THREE.Scene) {
   const mats = new Set<THREE.Material>()
   const geos = new Set<THREE.BufferGeometry>()
   env.traverse(o => {
@@ -759,7 +794,6 @@ function buildStageEnv(renderer: THREE.WebGLRenderer): THREE.Texture {
     ;(m as THREE.MeshBasicMaterial).map?.dispose()
     m.dispose()
   }
-  return rt.texture
 }
 
 /**

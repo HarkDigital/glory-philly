@@ -19,12 +19,15 @@ import { dockEventForm, type EventFormDock } from '../../ui/eventForm'
  * EVENTS — "The Back Room".
  *
  * One long banquet table set for a party down the middle of GLORY'S DINING
- * ROOM (room.ts, from the room kit and Mike's photos): reclaimed walnut
- * walls and boxy clad columns with wire-cage sconces, shelves packed with
- * LPs, the chalk tap boards on black, an exposed-brick accent panel, a Glory
- * LP face-out on a steel ledge; the black ceiling with the silver flex duct
- * and a galvanized trunk, wire-cage pendants over the table; the honey oak
- * floor; and at the far end the back bar itself ("Old 1837" on the brick,
+ * ROOM (room.ts, from the room kit and Mike's photos, ref6 above all): on
+ * the bar side a black wall with the three chalk tap boards, boxy walnut-clad
+ * columns with wire-cage sconces, LPs, an exposed-brick accent panel and a
+ * Glory LP face-out on a steel ledge; on the other side cream plaster with
+ * two framed prints under bare-bulb pendants; two round black cast-iron
+ * columns with flared capitals under a timber girder; the black ceiling with
+ * the silver flex duct and a galvanized trunk, wire-cage pendants over the
+ * table; the pale honey oak strip floor; and at the far end the back bar
+ * itself ("Old 1837" on the brick,
  * LPs over spouted liquor steps) behind the long oiled bar and its stools.
  * A party needs a record: across the head of the table a sideboard carries a
  * black deck playing a Glory record at 33⅓ and a walnut rack of three Glory
@@ -34,8 +37,9 @@ import { dockEventForm, type EventFormDock } from '../../ui/eventForm'
  *
  *   0.00–0.06  cut in: a dolly over the deck, down the room to the back bar
  *   0.07–0.72  "Book an Event / Parties & Corporate Events", the two body
- *              lines and Upcoming Events (copy column left; on top when
- *              stacked). Landing 0.1.
+ *              lines, the Event Inquiry Form button (lands on the form beat)
+ *              and Upcoming Events (copy column left; on top when stacked).
+ *              Landing 0.1.
  *   0.13–0.23  the camera cranes up over the head of the table to the prints
  *   0.22–0.70  the album: the top print lifts and turns up to the camera;
  *              each next one follows while the last is laid on the
@@ -43,7 +47,7 @@ import { dockEventForm, type EventFormDock } from '../../ui/eventForm'
  *              StoryClock (≤ 1.1 prints a second), cross-fades under reduced
  *              motion.
  *   0.71–0.80  the camera rises and turns down the room to the back bar
- *   0.77–0.975 THE FORM: the real Event Inquiry Form (src/ui/eventForm.ts)
+ *   0.76–0.94  THE FORM: the real Event Inquiry Form (src/ui/eventForm.ts)
  *              docked over the scene beside the room view (on phones it is
  *              the card over the room). It lives in #events' accessible
  *              section (srContent), never in this aria-hidden stage: Tab
@@ -74,8 +78,11 @@ const COPY_OUT = [0.695, 0.725] as const
 const TO_PRINTS = [0.125, 0.235] as const
 const ALBUM = [0.22, 0.7] as const
 const TO_ROOM = [0.71, 0.8] as const
-const CARD_IN = [0.77, 0.805] as const
-const CARD_OUT = [0.95, 0.975] as const
+const CARD_IN = [0.76, 0.795] as const
+// (the form is gone before the out-cut starts at ~0.95: the cut opens on the dark room, never on the cream card)
+const CARD_OUT = [0.915, 0.94] as const
+/** the form beat (anchors[1]) */
+const FORM_AT = 0.86
 
 // ---- the head of the table
 const AT = {
@@ -186,7 +193,7 @@ export default function events(): Chapter {
   return {
     id: 'events',
     group,
-    anchors: [0.1, 0.86],
+    anchors: [0.1, FORM_AT],
     busy: () => clock.busy,
 
     async init(ctx: ChapterContext) {
@@ -225,8 +232,16 @@ export default function events(): Chapter {
       head = rise(el('h2', 'hud-h2', undefined, copy), `${words.join(' ')} <em>${last}</em>`)
       const body = el('div', 'ev-body', undefined, copy)
       for (const b of EVENTS.body) el('p', 'hud-body', b, body)
-      // Upcoming Events (mouse/touch; keyboard reaches the same link in the accessible copy)
-      const up = el('a', 'hud-btn hud-btn--ghost ev-upcoming', undefined, copy)
+      // the source page's "Click below for more information": the Event Inquiry Form (the story's
+      // form beat, anchors[1]) and Upcoming Events. Mouse/touch only: keyboard and screen readers
+      // reach both in the accessible copy (the link, then the form itself)
+      const ctas = el('div', 'ev-ctas', undefined, copy)
+      const ask = el('button', 'hud-btn ev-inquire', undefined, ctas)
+      ask.type = 'button'
+      ask.append(document.createTextNode(EVENTS.cta))
+      el('span', 'ev-arrow', '→', ask).setAttribute('aria-hidden', 'true')
+      ask.addEventListener('click', () => window.__hark?.land('events', true, FORM_AT))
+      const up = el('a', 'hud-btn hud-btn--ghost ev-upcoming', undefined, ctas)
       up.href = LINKS.events.url
       up.target = '_blank'
       up.rel = 'noopener'

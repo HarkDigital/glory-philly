@@ -27,7 +27,9 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
  * chapter the glass drains: the level falls down the frame and leaves foam
  * LACING clinging to the glass, which fades as the next scene settles.
  * `beer` (0 pale straw → 0.5 amber → 1 stout) tints the pour per chapter.
- * Calm (reduced motion / Motion off): the engine fades through cream.
+ * Calm (reduced motion / Motion off): no pour — the engine fades through the
+ * room's dark (stout, capped at 0.85, attack rate-limited). A light fade
+ * colour over a dark scene was a full-frame flash at every cut.
  *
  * The final pass runs AFTER the sRGB output pass: it sees display values.
  * Keep the Post API (params / resetParams / setSize / render / compileAsync /
@@ -60,9 +62,9 @@ const FinalShader = {
     uVignette: { value: 0.3 },
     /** 0..1 wash to white */
     uFlash: { value: 0 },
-    /** 0..1 fade to uFadeColor (calm cuts) */
+    /** 0..1 fade to uFadeColor (calm cuts): the dark of the room, never a light colour */
     uFade: { value: 0 },
-    uFadeColor: { value: new THREE.Color('#efe7d8').convertLinearToSRGB() },
+    uFadeColor: { value: new THREE.Color('#0d0806').convertLinearToSRGB() },
     /** 0..1 speed dim: the whole frame dims while the page moves fast (flash safety net) */
     uSpeedDim: { value: 0 },
     /** vibrance (1 = none) and black-point lift (toward uHaze) */
@@ -132,7 +134,8 @@ const FinalShader = {
         float r = (0.0022 + 0.0016 * hash(vec2(cx, cy))) * (1.0 - 0.25 * fk);
         vec2 d = vec2(a.x - x0 - wob, fy * sp);
         float dist = length(d);
-        float ring = smoothstep(r, r * 0.55, dist) - 0.6 * smoothstep(r * 0.55, r * 0.1, dist);
+        // a bright rim, a lighter core (edges in order: reversed smoothstep is undefined in GLSL ES)
+        float ring = (1.0 - smoothstep(r * 0.55, r, dist)) - 0.6 * (1.0 - smoothstep(r * 0.1, r * 0.55, dist));
         acc += max(ring, 0.0) * on * step(0.2, hash(vec2(cx, cy + 5.0)));
       }
       return clamp(acc, 0.0, 1.0);
@@ -252,6 +255,8 @@ const FinalShader = {
         }
       }
 
+      // the calm fade goes in BEFORE the speed dim, so a fast calm scroll dims further
+      col = mix(col, uFadeColor, clamp(uFade, 0.0, 1.0));
       col *= 1.0 - clamp(uSpeedDim, 0.0, 0.8);
       float l = dot(col, LUM);
       col = max(mix(vec3(l), col, uSat), 0.0);
@@ -268,7 +273,6 @@ const FinalShader = {
       float gl = dot(col, LUM);
       col += n * uGrain * (0.5 + 2.0 * gl * (1.0 - gl));
 
-      col = mix(col, uFadeColor, clamp(uFade, 0.0, 1.0));
       gl_FragColor = vec4(col, 1.0);
     }
   `,
@@ -433,9 +437,165 @@ class FieldPass extends Pass {
   }
 }
 
+/**
+ * LITE BLOOM for phones and scaled-down GPUs (html.lowfx): 5 passes instead
+ * of UnrealBloom's 13 (measured ~0.14 ms per pass whatever its size, so the
+ * pass count is the cost). UnrealBloom's own high pass, taken while
+ * downsampling to 1/4, then three more x4 steps (1/16, 1/64, 1/256), each a
+ * 16-tap B-spline so neighbouring texels overlap (a light moving across the
+ * frame never steps its haze); one composite adds all four levels onto the
+ * frame. The levels span UnrealBloom's glow widths (~4 px to ~250 px) with its
+ * radius weights, so the filament glow AND the wide haze read the same.
+ */
+const LITE_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+`
+// x4 downsample: a 4x4 grid of bilinear taps at ±1, ±3 source texels,
+// weights (1 3 3 1)x(1 3 3 1): each covers 8x8 texels, overlapping its neighbours
+const LiteDownShader = /* glsl */ `
+  uniform sampler2D tDiffuse;
+  uniform vec2 uTexel;
+  uniform float uThreshold;
+  varying vec2 vUv;
+  vec3 tap(vec2 uv) {
+    vec3 c = texture2D(tDiffuse, uv).rgb;
+    #ifdef HIGH_PASS
+    // UnrealBloom's high pass on each 2x2 tap: Rec. 709 luminance, 0.01 soft edge
+    c *= smoothstep(uThreshold, uThreshold + 0.01, dot(c, vec3(0.2126, 0.7152, 0.0722)));
+    #endif
+    return c;
+  }
+  void main() {
+    vec3 s = vec3(0.0);
+    for (int y = 0; y < 4; y++) {
+      for (int x = 0; x < 4; x++) {
+        float wx = (x == 0 || x == 3) ? 1.0 : 3.0;
+        float wy = (y == 0 || y == 3) ? 1.0 : 3.0;
+        s += tap(vUv + vec2(float(x) * 2.0 - 3.0, float(y) * 2.0 - 3.0) * uTexel) * (wx * wy);
+      }
+    }
+    gl_FragColor = vec4(s / 64.0, 1.0);
+  }
+`
+// the composite: each level upsampled with 4 bilinear taps at ±0.5 texel (a
+// smooth quadratic B-spline), weighted, added onto the frame
+const LiteCompShader = /* glsl */ `
+  uniform sampler2D t1;
+  uniform sampler2D t2;
+  uniform sampler2D t3;
+  uniform sampler2D t4;
+  uniform vec2 uT1, uT2, uT3, uT4;
+  uniform vec4 uW;
+  varying vec2 vUv;
+  vec3 up(sampler2D t, vec2 texel) {
+    vec2 o = texel * 0.5;
+    return 0.25 * (texture2D(t, vUv - o).rgb + texture2D(t, vUv + o).rgb
+      + texture2D(t, vUv + vec2(o.x, -o.y)).rgb + texture2D(t, vUv + vec2(-o.x, o.y)).rgb);
+  }
+  void main() {
+    vec3 c = uW.x * up(t1, uT1) + uW.y * up(t2, uT2) + uW.z * up(t3, uT3) + uW.w * up(t4, uT4);
+    gl_FragColor = vec4(c, 1.0);
+  }
+`
+/** UnrealBloom's per-mip weight for a radius (its lerpBloomFactor) */
+const bloomFactor = (f: number, radius: number) => f + (1.2 - f - f) * radius
+/** level scales: 1/4, 1/16, 1/64, 1/256 */
+const LITE_LEVELS = [4, 16, 64, 256]
+
+class LiteBloomPass extends Pass {
+  strength = POST_DEFAULTS.bloomStrength
+  radius = POST_DEFAULTS.bloomRadius
+  threshold = POST_DEFAULTS.bloomThreshold
+  private levels = LITE_LEVELS.map(() => new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, depthBuffer: false }))
+  readonly pre: THREE.ShaderMaterial
+  readonly down: THREE.ShaderMaterial
+  readonly comp: THREE.ShaderMaterial
+  private quad: FullScreenQuad
+  constructor() {
+    super()
+    this.needsSwap = false
+    const down = (defines: Record<string, number>) =>
+      new THREE.ShaderMaterial({
+        vertexShader: LITE_VERT,
+        fragmentShader: LiteDownShader,
+        defines,
+        uniforms: { tDiffuse: { value: null }, uTexel: { value: new THREE.Vector2() }, uThreshold: { value: 1 } },
+        depthTest: false,
+        depthWrite: false,
+      })
+    this.pre = down({ HIGH_PASS: 1 })
+    this.down = down({})
+    this.comp = new THREE.ShaderMaterial({
+      vertexShader: LITE_VERT,
+      fragmentShader: LiteCompShader,
+      uniforms: {
+        t1: { value: null },
+        t2: { value: null },
+        t3: { value: null },
+        t4: { value: null },
+        uT1: { value: new THREE.Vector2() },
+        uT2: { value: new THREE.Vector2() },
+        uT3: { value: new THREE.Vector2() },
+        uT4: { value: new THREE.Vector2() },
+        uW: { value: new THREE.Vector4() },
+      },
+      // adds straight onto the frame (like UnrealBloom's blend copy)
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    })
+    this.quad = new FullScreenQuad(this.pre)
+    for (const t of this.levels) t.texture.generateMipmaps = false
+  }
+  setSize(w: number, h: number) {
+    LITE_LEVELS.forEach((k, i) => this.levels[i].setSize(Math.max(1, Math.round(w / k)), Math.max(1, Math.round(h / k))))
+  }
+  render(renderer: THREE.WebGLRenderer, _write: THREE.WebGLRenderTarget, read: THREE.WebGLRenderTarget) {
+    const autoClear = renderer.autoClear
+    renderer.autoClear = false
+    let src: THREE.WebGLRenderTarget = read
+    this.levels.forEach((rt, i) => {
+      const m = i === 0 ? this.pre : this.down
+      m.uniforms.tDiffuse.value = src.texture
+      m.uniforms.uTexel.value.set(1 / src.width, 1 / src.height)
+      m.uniforms.uThreshold.value = this.threshold
+      this.quad.material = m
+      renderer.setRenderTarget(rt)
+      renderer.clear()
+      this.quad.render(renderer)
+      src = rt
+    })
+    // UnrealBloom's five mips (glow widths ~4, 14, 40, 104, 257 px) mapped onto
+    // four levels (~4, 14, 50, 200 px): its 104 px mip goes mostly to the third
+    // (x 3: UnrealBloom's composite has a built-in 3.0 "for backwards compatibility")
+    const r = this.radius
+    const f = (x: number) => 3 * bloomFactor(x, r) * this.strength
+    const u = this.comp.uniforms
+    u.uW.value.set(f(1.0), f(0.8), f(0.6) + f(0.4) * 0.75, f(0.2) + f(0.4) * 0.25)
+    const [a, b, c, d] = this.levels
+    u.t1.value = a.texture
+    u.t2.value = b.texture
+    u.t3.value = c.texture
+    u.t4.value = d.texture
+    u.uT1.value.set(1 / a.width, 1 / a.height)
+    u.uT2.value.set(1 / b.width, 1 / b.height)
+    u.uT3.value.set(1 / c.width, 1 / c.height)
+    u.uT4.value.set(1 / d.width, 1 / d.height)
+    this.quad.material = this.comp
+    renderer.setRenderTarget(read)
+    this.quad.render(renderer)
+    renderer.autoClear = autoClear
+  }
+}
+
 export class Post {
   composer: EffectComposer
   bloom: UnrealBloomPass
+  /** phones / scaled-down GPUs: the 6-pass dual-filter bloom instead of UnrealBloom (setLite) */
+  liteBloom: LiteBloomPass
+  private lite = false
   final: ShaderPass
   private scenePass: ScenePass
   /**
@@ -484,6 +644,9 @@ export class Post {
     this.composer.addPass(this.scenePass)
     this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), POST_DEFAULTS.bloomStrength, POST_DEFAULTS.bloomRadius, POST_DEFAULTS.bloomThreshold)
     this.composer.addPass(this.bloom)
+    this.liteBloom = new LiteBloomPass()
+    this.liteBloom.enabled = false
+    this.composer.addPass(this.liteBloom)
     this.composer.addPass(new OutputPass())
     this.field = new FieldPass()
     this.composer.addPass(this.field)
@@ -500,6 +663,14 @@ export class Post {
   /** true when `rt` is the frame's own scene target (not a mirror / transmission pass) */
   isFrameTarget(rt: THREE.WebGLRenderTarget | null) {
     return rt === this.scenePass.target || rt === this.composer.renderTarget1 || rt === this.composer.renderTarget2
+  }
+
+  /**
+   * Phones and scaled-down GPUs (the engine's html.lowfx): swap UnrealBloom
+   * (13 passes) for the 6-pass dual-filter LiteBloom. Same params.
+   */
+  setLite(on: boolean) {
+    this.lite = on
   }
 
   /** THEME: the colour the calm fade passes through. */
@@ -533,11 +704,16 @@ export class Post {
       if (m && (m as THREE.Material).isMaterial) mats.push(m as THREE.Material)
     }
     for (const pass of this.composer.passes) add((pass as unknown as { material?: unknown }).material)
-    for (const m of (b.separableBlurMaterials as unknown[]) ?? []) add(m)
-    add(b.compositeMaterial)
-    add(b.blendMaterial)
-    add(b.materialHighPassFilter)
-    add(b.copyMaterial)
+    // phones never run UnrealBloom (lite is permanent there): don't link its 8 programs
+    if (!this.lite) {
+      for (const m of (b.separableBlurMaterials as unknown[]) ?? []) add(m)
+      add(b.compositeMaterial)
+      add(b.blendMaterial)
+      add(b.materialHighPassFilter)
+      add(b.copyMaterial)
+    }
+    const l = this.liteBloom
+    for (const m of [l.pre, l.down, l.comp]) add(m)
     return Promise.all(mats.map(m => this.renderer.compileAsync(new THREE.Mesh(quad.geometry, m), cam).catch(() => {})))
   }
 
@@ -578,10 +754,14 @@ export class Post {
       this.speedDim += (target - this.speedDim) * (1 - Math.exp(-dt / tau))
     }
     // chapters zero bloom where nothing crosses the threshold: skip the pass entirely
-    this.bloom.enabled = c.bloomStrength > 0.01
-    this.bloom.strength = c.bloomStrength
-    this.bloom.radius = c.bloomRadius
-    this.bloom.threshold = c.bloomThreshold
+    const bloomOn = c.bloomStrength > 0.01
+    this.bloom.enabled = bloomOn && !this.lite
+    this.liteBloom.enabled = bloomOn && this.lite
+    for (const b of [this.bloom, this.liteBloom]) {
+      b.strength = c.bloomStrength
+      b.radius = c.bloomRadius
+      b.threshold = c.bloomThreshold
+    }
     this.renderer.toneMappingExposure = c.exposure
     const u = this.final.uniforms
     u.uTime.value = time
