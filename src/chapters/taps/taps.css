@@ -103,6 +103,35 @@
   line-height: 1.3;
   color: var(--fg);
 }
+/* the pouring tap's row: amber name + a small amber dot (same as the Cellar) — no layout shift */
+.taps-stage .taps-list li {
+  position: relative;
+  transition: color 0.25s ease;
+}
+.taps-stage .taps-list li::before {
+  content: '';
+  position: absolute;
+  left: -11px;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--amber-hot);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.taps-stage .taps-list li.is-on {
+  color: var(--amber-hot);
+}
+.taps-stage .taps-list li.is-on::before {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .taps-stage .taps-list li,
+  .taps-stage .taps-list li::before {
+    transition: none;
+  }
+}
 .taps-stage .taps-list li.is-off {
   display: none;
 }

@@ -748,6 +748,15 @@ export default function taps(): Chapter {
         callout.offset.y = Math.max(-46, band - py)
         callout.update(tmp2, ctx.camera, frame.width, frame.height, smoothstep(0.38, 0.44, u) * (1 - smoothstep(0.88, 0.94, u)))
       } else callout.update(tmp2, ctx.camera, frame.width, frame.height, 0)
+      // the tap that's pouring lights up amber in its board too (Mike: highlight
+      // the featured beer in the list), on the same clock as the pull + callout
+      {
+        const onIdx = cg >= 0 && uOf(q, cg) > 0.36 && uOf(q, cg) < 0.94 ? POUR_I[cg] : -1
+        boards.forEach((b, gi) => {
+          const first = TAPS.findIndex(t => t.group === gi)
+          b.items.forEach((li, k) => li.classList.toggle('is-on', first + k === onIdx))
+        })
+      }
 
       // glow behind the glasses is stronger while pouring
       ;(backGlow.material as THREE.MeshBasicMaterial).opacity = 0.75 + 0.25 * sOn

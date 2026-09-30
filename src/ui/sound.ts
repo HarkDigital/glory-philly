@@ -156,10 +156,13 @@ export class Sound {
       this.applyRunning()
     })
     window.addEventListener('hark:tone', e => {
+      if (document.documentElement.dataset.warming) return
       const d = (e as CustomEvent<{ hz?: number; level?: number }>).detail
       if (d && typeof d.hz === 'number') this.tone(d.hz, d.level ?? 0)
     })
     window.addEventListener('hark:sfx', e => {
+      // a chapter being warmed up in the background plays its beats silently
+      if (document.documentElement.dataset.warming) return
       const d = (e as CustomEvent<{ kind?: string; level?: number }>).detail ?? {}
       const ctx = this.live()
       if (!ctx) return

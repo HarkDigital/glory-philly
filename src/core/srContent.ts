@@ -1,5 +1,5 @@
 import {
-  BAR, BOTTLES, BRAND, CITY_WIDE, COCKTAILS, CREDIT, DRAFTS, EVENTS, HOURS, KITCHEN_HOURS, LINKS, MENU, PEOPLE, RESERVATIONS, SECTIONS, SOCIALS, WINE,
+  BAR, BOTTLES, BRAND, CELLAR_UI, CITY_WIDE, COCKTAILS, CREDIT, DRAFTS, EVENTS, HOURS, KITCHEN_HOURS, LINKS, MENU, PEOPLE, RESERVATIONS, SECTIONS, SOCIALS, WINE,
 } from '../content'
 import { createEventForm } from '../ui/eventForm'
 
@@ -67,9 +67,9 @@ const COPY: Record<string, () => string> = {
 
   cellar: () => `
     <p>${esc(SECTIONS.cellar.eyebrow)}</p>
-    <h2 tabindex="0">${esc(SECTIONS.cellar.title)}</h2>
-    <h3>Bottles</h3>
-    ${BOTTLES.map((g, i) => `<h4>${stop('cellar', i, g.title)}</h4><ul>${g.beers.map(b => `<li>${esc(b)}</li>`).join('')}</ul>`).join('')}
+    <h2 tabindex="0">${esc(CELLAR_UI.bottles)}</h2>
+    ${BOTTLES.map((g, i) => `<h3>${stop('cellar', i, g.title)}</h3><ul>${g.beers.map(b => `<li>${esc(b)}</li>`).join('')}</ul>`).join('')}
+    <h2>${esc(SECTIONS.cellar.title)}</h2>
     <h3>${stop('cellar', 3, 'Wine')}</h3>
     <p>${esc(BAR.wine)}</p>
     <ul>${WINE.map(w => `<li>${esc(w)}</li>`).join('')}</ul>

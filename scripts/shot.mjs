@@ -70,7 +70,7 @@ try {
   if (args.cam) q.set('cam', String(args.cam))
   if (args.q) for (const [k, v] of new URLSearchParams(String(args.q))) q.set(k, v)
   await page.goto(`http://localhost:${port}/?${q}`, { waitUntil: 'load', timeout: 90000 })
-  await page.waitForFunction('window.__hark && window.__hark.ready', { timeout: 90000 })
+  await page.waitForFunction('window.__hark && window.__hark.ready && window.__hark.engine.allReady', { timeout: 240000 })
   await new Promise(r => setTimeout(r, 800))
 
   // --norot: dismiss the phone-landscape rotate card ("Continue anyway") so the scene runs
@@ -93,7 +93,7 @@ try {
     // a dev-server reload mid-run silently resets the page to the hero, so
     // confirm the engine is in the requested chapter before capturing
     for (let attempt = 0; attempt < 4; attempt++) {
-      await page.waitForFunction('window.__hark && window.__hark.ready', { timeout: 90000 })
+      await page.waitForFunction('window.__hark && window.__hark.ready && window.__hark.engine.allReady', { timeout: 240000 })
       if (id === 'p') await page.evaluate(v => window.__hark.goto(v), local)
       else await page.evaluate((c, v) => window.__hark.gotoChapter(c, v), id, local)
       if (args.eval) await page.evaluate(String(args.eval))

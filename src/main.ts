@@ -15,6 +15,8 @@ import { createChrome } from './ui/chrome'
 import { Sound } from './ui/sound'
 import { renderFallback } from './ui/fallback'
 import { mountDebug } from './core/debug'
+import { trace } from './core/boottrace'
+import { publicUrl } from './core/assets'
 
 /*
  * URL params (handy for review + screenshots):
@@ -68,7 +70,40 @@ async function boot() {
   }
   engine.assets.onProgress = (done, total) => loader.progress(total ? done / total : 0)
   if (document.fonts?.ready) engine.assets.track(document.fonts.ready)
-  await engine.load(CHAPTERS, params.get('only'))
+  // lazy boot: build the chapter the visitor lands on first, the rest after the reveal
+  const firstChapter = (() => {
+    const c = params.get('c')
+    if (c && CHAPTERS.some(ch => ch.id === c)) return c
+    const h = location.hash.slice(1)
+    if (h && CHAPTERS.some(ch => ch.id === h)) return h
+    const p = parseFloat(params.get('p') ?? '')
+    if (Number.isFinite(p)) {
+      const total = CHAPTERS.reduce((a, ch) => a + ch.length, 0)
+      let at = 0
+      for (const ch of CHAPTERS) if ((at += ch.length) >= p * total) return ch.id
+    }
+    return CHAPTERS[0].id
+  })()
+  // Cold phones spend seconds building GPU pipelines for the first room (Safari
+  // does it on first draw). Reveal as soon as the hero is built: its live copy
+  // runs over a still of its own first frame (public/posters, made with
+  // scripts/poster.mjs) while the 3D warms behind, then the canvas takes over.
+  const early = firstChapter === 'hero' && !params.get('only')
+  let poster: HTMLImageElement | null = null
+  if (early) {
+    poster = document.createElement('img')
+    poster.className = 'boot-poster'
+    poster.alt = ''
+    poster.decoding = 'async'
+    poster.src = publicUrl(innerWidth < innerHeight ? 'posters/hero-port.webp' : 'posters/hero-land.webp')
+    canvas.after(poster)
+  }
+  await engine.load(CHAPTERS, params.get('only'), firstChapter, { early })
+  if (poster) {
+    const p = poster
+    // only while the visitor is still on the hero (it's a still of the hero)
+    engine.onFrame.push((_f, st) => p.classList.toggle('is-away', st.index !== 0))
+  }
 
   // skip link mid-story: focus the current chapter's heading (no jump to the hero)
   document.querySelector<HTMLAnchorElement>('.skip-link')?.addEventListener('click', e => {
@@ -94,6 +129,7 @@ async function boot() {
   else if (hash && CHAPTERS.some(ch => ch.id === hash)) engine.land(hash, false)
   else engine.goto(0)
 
+  trace('engine start')
   engine.start()
   window.__hark = {
     ready: false,
@@ -104,9 +140,20 @@ async function boot() {
   }
   if (params.has('debug')) mountDebug(engine)
 
+  trace('loader finish…')
   await loader.finish()
+  trace('revealed')
   document.documentElement.dataset.ready = '1'
   window.dispatchEvent(new Event('hark:reveal'))
+  void engine.bootReady.then(() => {
+    trace('first chapter live')
+    if (poster) {
+      poster.classList.add('is-gone')
+      const p = poster
+      window.setTimeout(() => p.remove(), 1000)
+    }
+    return engine.loadRest()
+  })
   window.__hark.ready = true
 }
 

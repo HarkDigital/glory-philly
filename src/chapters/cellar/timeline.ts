@@ -4,14 +4,16 @@ import { COCKTAILS } from '../../content'
  * THE CELLAR's story (local progress; length 8.2 vh in chapters/index.ts):
  *
  *  0.000–0.045  cut in: a fast dolly along the backlit bottle wall
- *  0.045–0.105  the headline over the wall (intro 0.07)
+ *  0.045–0.105  the BOTTLES headline over the wall (intro 0.07)
  *  0.105–0.175  BOTTLES · American: the camera tilts down its three shelves
  *  0.175–0.345  BOTTLES · International: three shelves, snaking (one page of
  *               names per shelf on phones; all 42 in three columns on desktop,
  *               the column of the shelf in frame lit)
  *  0.345–0.390  BOTTLES · Local: a cut with the card onto the whole Local bay,
  *               in to a macro on the two Ploughman bottles, out to the LP
- *  0.390–0.490  WINE: the stainless wine tower pours red, white and rosé
+ *  0.390–0.420  the WINE & SPECIALTY COCKTAILS headline as the camera reaches
+ *               the wine tower (the source site's second heading)
+ *  0.420–0.490  WINE: the stainless wine tower pours red, white, rosé in turn
  *  0.490–0.945  COCKTAILS: seven product shots sliding down the bar
  *  0.945–1.000  push in on the last glass; the ruby pour cut
  *
@@ -30,8 +32,12 @@ export const WINE_T = [0.39, 0.49] as const
 export const COCK = [0.49, 0.945] as const
 export const OUT = 0.945
 
-/** the wine pour (each tap staggered) */
-export const POUR = [0.397, 0.467] as const
+/** the wine card (after the second headline) */
+export const WINE_CARD = 0.42
+/** the wine pours: tap i starts at POUR0 + i·POUR_STEP and pours for POUR_DUR (in turn, so the list can follow) */
+export const POUR0 = 0.418
+export const POUR_STEP = 0.018
+export const POUR_DUR = 0.03
 
 export const SLOT = (COCK[1] - COCK[0]) / COCKTAILS.length
 

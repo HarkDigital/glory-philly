@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { diag, trace } from './boottrace'
 import Lenis from 'lenis'
 import { Post } from './post'
 import { Assets } from './assets'
@@ -19,6 +20,8 @@ export interface ChapterSlot {
   section: HTMLElement
   stage: HTMLElement
   failed: boolean
+  /** true once the chapter is initialised and its shaders warmed (lazy boot) */
+  ready: boolean
 }
 
 export interface EngineState {
@@ -155,6 +158,17 @@ export class Engine {
   private residency: Residency
   /** true while something (e.g. the rotate gate) covers the scene — skip rendering */
   paused = false
+  /** every chapter initialised and warmed (screenshot/test tools wait for this) */
+  allReady = false
+  /**
+   * The first chapter is showing (DOM copy live) but its shaders are still
+   * warming: tick() runs chapters and copy but skips the GPU draw, so the
+   * page stays responsive over main.ts's poster frame.
+   */
+  holdDraw = false
+  /** resolves when the first chapter can draw (always resolved after load() without `early`) */
+  bootReady: Promise<void> = Promise.resolve()
+  private restStarted = false
   private cutHold = 0
   private cutCss = -1
   private rapidUntil = 0
@@ -361,7 +375,7 @@ export class Engine {
    * Inits run one per frame so the loader keeps animating.
    * `only` (debug) inits a single chapter and stubs the rest.
    */
-  async load(defs: ChapterDef[], only?: string | null) {
+  async load(defs: ChapterDef[], only?: string | null, first?: string | null, opts: { early?: boolean } = {}) {
     let cursor = 0
     for (const def of defs) {
       // the accessible, linear copy of the chapter lives in its scroll section;
@@ -420,6 +434,7 @@ export class Engine {
         section,
         stage,
         failed: false,
+        ready: false,
       }
       cursor += def.length
       this.slots.push(slot)
@@ -431,31 +446,100 @@ export class Engine {
     this.state.total = cursor
     this.layoutTrack()
 
-    const active = this.slots.filter(s => !only || s.def.id === only)
-    const modules = active.map(s => this.assets.track(s.def.load()).catch(err => err as Error))
-    for (let i = 0; i < active.length; i++) {
-      const slot = active[i]
-      try {
-        const mod = await modules[i]
-        if (mod instanceof Error) throw mod
-        slot.chapter = mod.default()
-        await this.assets.track(Promise.resolve(slot.chapter.init(slot.ctx)))
-      } catch (err) {
-        console.error(`[hark] chapter "${slot.def.id}" failed to load`, err)
-        slot.failed = true
-        slot.chapter = emptyChapter(slot.def.id)
-        slot.stage.replaceChildren()
-      }
-      slot.chapter.group.visible = false
-      this.scene.add(slot.chapter.group)
-      this.keyboardViaCopyLayer(slot.stage)
+    // LAZY BOOT: a cold phone spends ~35 s compiling/warming shaders for all
+    // eight rooms (measured in iOS Safari), so only the chapter the visitor
+    // lands on is built before the reveal; loadRest() builds the others in the
+    // background, nearest first, while they read.
+    const firstIdx = Math.max(0, this.slots.findIndex(s => s.def.id === (only ?? first)))
+    const boot = only ? this.slots.filter(s => s.def.id === only) : [this.slots[firstIdx]]
+    trace(`load: ${boot.map(s => s.def.id).join(', ')} first (${this.slots.length} chapters)`)
+    for (const s of this.slots) if (!boot.includes(s)) s.stage.classList.add('is-loading')
+    // every boot step is tracked up front, so the loader's bar only reaches 100% at the end
+    const step = () => {
+      let done!: () => void
+      this.assets.track(new Promise<void>(r => (done = r)))
+      return done
+    }
+    const steps = boot.map(() => ({ init: step(), warm: step() }))
+    const compileStep = step()
+    for (let i = 0; i < boot.length; i++) {
+      await this.initSlot(boot[i])
+      steps[i].init()
       await nextFrame()
     }
-    for (const slot of this.slots) if (!slot.chapter.group.parent) this.scene.add(slot.chapter.group)
-
-    await this.prewarm()
+    this.onBootCompiled = compileStep
+    const warm = async () => {
+      trace('prewarm start')
+      await this.prewarm(boot, true, () => steps.forEach(x => x.warm()))
+      for (const slot of boot) slot.ready = true
+      if (only) this.allReady = true
+      this.holdDraw = false
+      trace('prewarm done')
+    }
+    if (opts.early) {
+      // reveal now: the first chapter's copy runs over main.ts's poster while
+      // its shaders warm (the draw is held until they have)
+      this.holdDraw = true
+      compileStep()
+      steps.forEach(x => x.warm())
+      this.bootReady = warm()
+      return
+    }
+    await warm()
   }
 
+  private onBootCompiled: (() => void) | null = null
+
+  /** Build one chapter: import, create, init, add to the scene. Failures become an empty chapter. */
+  private async initSlot(slot: ChapterSlot) {
+    try {
+      const mod = await slot.def.load()
+      const chapter = mod.default()
+      const t0 = performance.now()
+      await Promise.resolve(chapter.init(slot.ctx))
+      trace(`init ${slot.def.id} ${Math.round(performance.now() - t0)} ms`)
+      chapter.group.visible = false
+      this.scene.remove(slot.chapter.group)
+      slot.chapter = chapter
+    } catch (err) {
+      console.error(`[hark] chapter "${slot.def.id}" failed to load`, err)
+      slot.failed = true
+      slot.chapter = emptyChapter(slot.def.id)
+      slot.stage.replaceChildren()
+    }
+    slot.chapter.group.visible = false
+    this.scene.add(slot.chapter.group)
+    this.keyboardViaCopyLayer(slot.stage)
+  }
+
+  /**
+   * After the reveal: build and warm the remaining chapters one at a time,
+   * nearest to where the visitor is first, each step waiting for a calm
+   * moment (no fast scroll, no jump) so the one-off compile stalls land while
+   * they read rather than mid-gesture. A chapter still loading when reached
+   * shows the room backdrop and a small spinning record until it's ready.
+   */
+  async loadRest() {
+    if (this.restStarted || this.allReady) return
+    this.restStarted = true
+    const pending = () => this.slots.filter(s => !s.ready)
+    while (pending().length) {
+      const here = this.state.index
+      const next = pending().sort((a, b) => Math.abs(this.slots.indexOf(a) - here) - Math.abs(this.slots.indexOf(b) - here))[0]
+      const urgent = this.slots.indexOf(next) === here
+      // wait for a calm moment unless the visitor is already waiting on this chapter
+      for (let t = 0; !urgent && t < 90 && (Math.abs(this.frame.velocity) > 0.25 || this.jump); t++) await nextFrame()
+      next.stage.classList.add('is-loading')
+      await this.initSlot(next)
+      await nextFrame()
+      await this.prewarm([next], false)
+      next.ready = true
+      next.stage.classList.remove('is-loading')
+      await nextFrame()
+    }
+    this.allReady = true
+    trace('all chapters ready')
+  }
   /**
    * Stages are aria-hidden visuals; keyboard and screen-reader users drive the
    * story through the linear copy in #track instead. Keep stage controls out
@@ -477,7 +561,18 @@ export class Engine {
    * mapping) in parallel, then render each chapter at a few points so lazily
    * built materials, geometry and textures upload before the reveal.
    */
-  private async prewarm() {
+  private async prewarm(list: ChapterSlot[], boot: boolean, onCompiled?: () => void) {
+    // chapters' sound cues (hark:sfx) are ignored while a warm-up drives them
+    document.documentElement.dataset.warming = '1'
+    try {
+      await this.prewarmInner(list, boot)
+    } finally {
+      delete document.documentElement.dataset.warming
+    }
+    onCompiled?.()
+  }
+
+  private async prewarmInner(list: ChapterSlot[], boot: boolean) {
     // lit programs key on the environment map: give the scene its real one first
     ;(this.world as unknown as { warmEnv?: () => void }).warmEnv?.()
     const target = this.post.sceneTarget
@@ -487,7 +582,9 @@ export class Engine {
     // synchronously, on first entry.
     const compiles: Promise<unknown>[] = []
     this.renderer.setRenderTarget(target)
-    for (const slot of this.slots) {
+    const wasVisible = this.slots.map(s => s.chapter.group.visible)
+    for (const slot of list) {
+      const tc = performance.now()
       for (const other of this.slots) other.chapter.group.visible = other === slot
       for (const l of [0.5, 0.04, 0.92]) {
         try {
@@ -504,23 +601,32 @@ export class Engine {
           console.error(`[hark] chapter "${slot.def.id}" failed during compile`, err)
         }
       }
+      trace(`compile ${slot.def.id} (sync) ${Math.round(performance.now() - tc)} ms`)
+      // put the live view back before yielding: a background warm-up must never
+      // leave the visitor's chapter hidden (or the warming one shown) for a frame
+      this.slots.forEach((s, i) => (s.chapter.group.visible = boot ? false : wasVisible[i]))
       // program setup is synchronous inside compileAsync: yield per chapter so
       // boot never becomes one long task (the compiles still run in parallel)
       await nextFrame()
       this.renderer.setRenderTarget(target)
     }
-    for (const slot of this.slots) slot.chapter.group.visible = false
-    compiles.push(this.post.compileAsync())
+    this.slots.forEach((s, i) => (s.chapter.group.visible = boot ? false : wasVisible[i]))
+    if (boot) compiles.push(this.post.compileAsync())
+    const tw = performance.now()
     await Promise.all(compiles)
+    trace(`compiles settled ${Math.round(performance.now() - tw)} ms`)
+    if (boot) this.onBootCompiled?.()
     await nextFrame()
 
-    // the composer's own passes — with a cut on screen, so the colour-field
-    // pass and the final pass's field branch link now, not on the first cut
-    this.post.transition = 0.5
-    this.post.render(0.016, 0)
-    this.post.transition = 0
-    this.post.render(0.016, 0)
-    await nextFrame()
+    if (boot) {
+      // the composer's own passes — with a cut on screen, so the colour-field
+      // pass and the final pass's field branch link now, not on the first cut
+      this.post.transition = 0.5
+      this.post.render(0.016, 0)
+      this.post.transition = 0
+      this.post.render(0.016, 0)
+      await nextFrame()
+    }
 
     // Render each chapter at a few points so geometry/textures upload and the
     // GPU builds pipelines for the real attachment format (incl. MSAA).
@@ -528,16 +634,29 @@ export class Engine {
       type: THREE.HalfFloatType,
       samples: target.samples,
     })
-    for (const slot of this.slots) {
+    const before = diag ? new Set((this.renderer.info.programs ?? []).map(p => p.cacheKey)) : null
+    // the active chapter (if any) must not be drawn into the warm-up target
+    const live = this.slots.filter(s => s.chapter.group.visible)
+    for (const s of live) s.chapter.group.visible = false
+    for (const slot of list) {
+      const tr = performance.now()
       try {
         slot.chapter.group.visible = true
+        // first a few objects at a time across frames (WebKit builds a GPU
+        // pipeline per program on its first draw — seconds for a whole room —
+        // so this keeps the page responsive), then whole-frame passes
+        await this.warmChunks(slot, rt, live)
+        slot.chapter.group.visible = true
+        for (const s of live) s.chapter.group.visible = false
         for (const l of [0.04, 0.92, 0.5]) {
           slot.chapter.update(l, this.frame, slot.ctx)
           slot.chapter.camera(l, this.frame, this.pose)
           this.applyCamera(0)
           // let the world take this chapter's state too (world-owned objects
-          // that only show in some chapters compile here, not on first entry)
-          this.world.update(this.frame, this.camera)
+          // that only show in some chapters compile here, not on first entry).
+          // Not after the reveal: the world damps toward its params, so a
+          // background warm-up would tug the visitor's lighting.
+          if (boot) this.world.update(this.frame, this.camera)
           this.renderer.setRenderTarget(rt)
           this.renderer.render(this.scene, this.camera)
         }
@@ -546,10 +665,82 @@ export class Engine {
       } finally {
         slot.chapter.group.visible = false
       }
+      trace(`warm render ${slot.def.id} ${Math.round(performance.now() - tr)} ms`)
+      // restore the live view before yielding (see the compile loop)
+      this.renderer.setRenderTarget(null)
+      for (const s of live) s.chapter.group.visible = true
       await nextFrame()
+      for (const s of live) s.chapter.group.visible = false
     }
     this.renderer.setRenderTarget(null)
     rt.dispose()
+    for (const s of live) s.chapter.group.visible = true
+    if (before) {
+      const fresh = (this.renderer.info.programs ?? []).filter(p => !before.has(p.cacheKey))
+      trace(`warm-only programs: ${fresh.length} (of ${this.renderer.info.programs?.length})`)
+      for (const p of fresh) console.info('[warm-only]', p.name || '-', p.cacheKey.slice(0, 300))
+    }
+  }
+
+  /**
+   * Draw a chapter's objects into the warm-up target a handful at a time,
+   * yielding a frame between batches (with the live view restored), so the
+   * one-off pipeline builds never freeze the page for seconds. Every object
+   * is drawn regardless of the camera (frustum culling off for the batch),
+   * with every light on so the program variants match the real frames.
+   */
+  private async warmChunks(slot: ChapterSlot, rt: THREE.WebGLRenderTarget, live: ChapterSlot[]) {
+    const L = 31
+    const objs: THREE.Object3D[] = []
+    slot.chapter.update(0.5, this.frame, slot.ctx)
+    slot.chapter.camera(0.5, this.frame, this.pose)
+    this.applyCamera(0)
+    slot.chapter.group.traverse(o => {
+      const r = o as THREE.Mesh
+      if ((r.isMesh || (o as THREE.Points).isPoints || (o as THREE.Line).isLine || (o as THREE.Sprite).isSprite) && !o.layers.isEnabled(L)) objs.push(o)
+    })
+    const lights: THREE.Object3D[] = []
+    this.scene.traverse(o => {
+      if ((o as THREE.Light).isLight && !o.layers.isEnabled(L)) lights.push(o)
+    })
+    const size = this.mobile ? 4 : 12
+    const mask = this.camera.layers.mask
+    for (const l of lights) l.layers.enable(L)
+    try {
+      for (let i = 0; i < objs.length; i += size) {
+        const batch = objs.slice(i, i + size)
+        const culled = batch.map(o => o.frustumCulled)
+        for (const o of batch) {
+          o.layers.enable(L)
+          o.frustumCulled = false
+        }
+        try {
+          this.camera.layers.set(L)
+          this.renderer.setRenderTarget(rt)
+          this.renderer.render(this.scene, this.camera)
+        } catch {
+          /* a bad object only loses its warm-up */
+        } finally {
+          this.camera.layers.mask = mask
+          batch.forEach((o, k) => {
+            o.layers.disable(L)
+            o.frustumCulled = culled[k]
+          })
+        }
+        // yield with the live view restored
+        this.renderer.setRenderTarget(null)
+        slot.chapter.group.visible = false
+        for (const s of live) s.chapter.group.visible = true
+        await nextFrame()
+        for (const s of live) s.chapter.group.visible = false
+        slot.chapter.group.visible = true
+        slot.chapter.camera(0.5, this.frame, this.pose)
+        this.applyCamera(0)
+      }
+    } finally {
+      this.camera.layers.mask = mask
+      for (const l of lights) l.layers.disable(L)
+    }
   }
 
   private layoutTrack() {
@@ -1087,6 +1278,6 @@ export class Engine {
       )
     }
     this.renderer.info.reset()
-    this.post.render(f.dt, f.time)
+    if (!this.holdDraw) this.post.render(f.dt, f.time)
   }
 }

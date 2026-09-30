@@ -28,19 +28,21 @@ function plan(id: string, n: number, layout: Layout, all: boolean): { per: numbe
 }
 
 export interface BeatState {
-  /** 'head' | 'american' | 'international' | 'local' | 'wine' | 'cocktails' | null */
+  /** 'american' | 'international' | 'local' | 'wine' | 'cocktails' | null */
   beat: string | null
   /** international page (= shelf) 0..2 */
   page: number
   /** active cocktail 0..6 */
   cocktail: number
-  head: boolean
+  /** the headline on screen: the source site's two headings, BOTTLES then WINE & SPECIALTY COCKTAILS */
+  head: 'bottles' | 'wine' | null
+  /** the item the 3D singles out (the bottle the camera settles on, the wine pouring): its list index, or -1 */
+  item: number
 }
 
 export class CellarHud {
   root: HTMLElement
-  private head: HTMLElement
-  private h2: HTMLElement
+  private heads: Record<'bottles' | 'wine', { block: HTMLElement; h2: HTMLElement }>
   private scrim: HTMLElement
   private cards: Record<string, HTMLElement> = {}
   private titles: Record<string, HTMLElement> = {}
@@ -48,15 +50,28 @@ export class CellarHud {
   private pagers: Record<string, HTMLElement> = {}
   private pages: Record<string, HTMLElement[]> = {}
   private cockItems: { item: HTMLElement; name: HTMLElement; spec: HTMLElement }[] = []
+  private wineItems: HTMLElement[] = []
+  private lit: HTMLElement | null = null
   private layout = ''
   private last = { beat: '', page: -1, cocktail: -1, row: -1 }
 
   constructor(stage: HTMLElement) {
     this.root = el('div', 'cel', undefined, stage)
     this.scrim = el('div', 'cel-scrim', undefined, this.root)
-    this.head = el('div', 'cel-head', undefined, this.root)
-    el('p', 'hud-eyebrow', SECTIONS.cellar.eyebrow, this.head)
-    this.h2 = rise(el('h2', 'hud-h2 cel-title', undefined, this.head), SECTIONS.cellar.title.replace('&', '&amp;').replace(/Cocktails$/, '<em>Cocktails</em>'))
+    // the headlines: BOTTLES over the bottle beats (under the chapter's eyebrow),
+    // WINE & SPECIALTY COCKTAILS as the wine beat starts (under the rest of it)
+    const headline = (eyebrow: string, html: string) => {
+      const block = el('div', 'cel-head', undefined, this.root)
+      el('p', 'hud-eyebrow', eyebrow, block)
+      return { block, h2: rise(el('h2', 'hud-h2 cel-title', undefined, block), html) }
+    }
+    this.heads = {
+      bottles: headline(SECTIONS.cellar.eyebrow, CELLAR_UI.bottles),
+      wine: headline(
+        SECTIONS.cellar.eyebrow.split(' · ').slice(1).join(' · '),
+        SECTIONS.cellar.title.replace('&', '&amp;').replace(/Cocktails$/, '<em>Cocktails</em>'),
+      ),
+    }
 
     const dock = el('div', 'cel-dock', undefined, this.root)
     // bottles: one card per group
@@ -83,7 +98,8 @@ export class CellarHud {
         const dot = el('span', 'cel-dot', undefined, li)
         if (i < 3) dot.style.background = WINE_DOTS[i]
         else dot.classList.add('cel-dot--ring')
-        el('span', '', w, li)
+        el('span', 'cel-name', w, li)
+        this.wineItems.push(li)
       })
       this.cards.wine = card
     }
@@ -130,6 +146,7 @@ export class CellarHud {
     }
     this.root.dataset.layout = layout
     this.last = { beat: '', page: -1, cocktail: -1, row: -1 }
+    this.lit = null
   }
 
   update(s: BeatState, w: number, h: number) {
@@ -142,10 +159,13 @@ export class CellarHud {
       this.build(layout, all)
       this.root.classList.toggle('is-paged', !all)
     }
-    setRise(this.h2, s.head)
-    this.head.classList.toggle('is-on', s.head)
-    this.scrim.classList.toggle('is-on', s.head || !!s.beat)
-    this.scrim.classList.toggle('is-head', s.head)
+    for (const k of ['bottles', 'wine'] as const) {
+      const on = s.head === k
+      setRise(this.heads[k].h2, on)
+      this.heads[k].block.classList.toggle('is-on', on)
+    }
+    this.scrim.classList.toggle('is-on', !!s.head || !!s.beat)
+    this.scrim.classList.toggle('is-head', !!s.head)
     for (const k of Object.keys(this.cards)) {
       const on = s.beat === k
       this.cards[k].classList.toggle('is-on', on)
@@ -167,6 +187,20 @@ export class CellarHud {
     }
     for (const id of ['american', 'local']) this.pages[id]?.forEach(p => p.classList.add('is-on'))
     this.last.beat = s.beat ?? ''
+    // the item the 3D singles out, amber in its list (one at a time; fades by CSS)
+    let lit: HTMLElement | null = null
+    if (s.item >= 0) {
+      if (s.beat === 'wine') lit = this.wineItems[s.item] ?? null
+      else if (s.beat === 'american' || s.beat === 'international' || s.beat === 'local') {
+        const all = this.pages[s.beat]?.flatMap(p => [...p.querySelectorAll<HTMLElement>('li')]) ?? []
+        lit = all[s.item] ?? null
+      }
+    }
+    if (lit !== this.lit) {
+      this.lit?.classList.remove('is-on')
+      lit?.classList.add('is-on')
+      this.lit = lit
+    }
     // cocktails
     this.cockItems.forEach((c, i) => {
       const on = s.beat === 'cocktails' && i === s.cocktail

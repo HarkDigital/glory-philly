@@ -29,7 +29,7 @@ for (const mobile of [false, true]) {
   const t0 = Date.now()
   const sep = base.includes('?') ? '&' : '?'
   await p.goto(`${base}${sep}nointro&v=${Date.now()}`, { waitUntil: 'load' })
-  await p.waitForFunction('window.__hark && window.__hark.ready', { timeout: 90000 })
+  await p.waitForFunction('window.__hark && window.__hark.ready && window.__hark.engine.allReady', { timeout: 240000 })
   const ready = Date.now() - t0
   const ids = await p.evaluate(() => window.__hark.engine.slots.map(s => s.def.id))
   for (const id of ids.slice(1)) {

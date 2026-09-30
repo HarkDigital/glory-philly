@@ -43,9 +43,11 @@ import { BRAND } from '../../content'
  * pendants over the long oiled bar (kit makeBarRun: honey planks, the black
  * rubber rail) that the wine tower and the cocktails stand on.
  *
- * The named bottles (bottles.ts) stand on these shelves; the kit's generic
- * bottles fill the rest of each row. No real lights: the bulbs' pools light
- * the kit (and, hooked in, the named bottles).
+ * The beer (bottles.ts) stands on the American, International and Local
+ * shelves — the named bottles and unnamed beer filling each row (the kit's
+ * generic bottles are liquor: they stay on the spouted steps and over the
+ * records, the cocktails' backdrop). No real lights: the bulbs' pools light
+ * the kit (and, hooked in, the bottles).
  */
 
 /** chapter (world) units per metre: a 750 ml bottle ≈ 0.3 m = 1.8 units */
@@ -65,6 +67,8 @@ export const Y0 = COUNTER_Y - CY * K
 export const SHELF_Y = [1.903, 1.47, CY]
 /** the Local shelf (kit m): the two bottles + the "Bottles" LP */
 export const LOCAL_SHELF = 1.42
+/** the shelf over it (kit m): more beer (bottles.ts) */
+export const LOCAL_TOP = 1.88
 /** the cladding's face in front of the wall plane (m) */
 export const WZ = 0.02
 /** the columns' depth (their front face, m) */
@@ -162,33 +166,14 @@ export function makeCellarBar(rows: NamedRow[], mobile: boolean): CellarBar {
       for (let i = 0; i < n; i++) addCooler(c, w - 0.01, underY, COUNTER_D - 0.02, { x: coolX0 + w * (i + 0.5), doors: 2 })
     }
 
-    // fill a named row's bay either side of the named bottles with the kit's generic ones
-    const fill = (bx0: number, bx1: number, r: NamedRow | undefined, y: number, maxH: number) => {
-      const z = WZ + 0.105
-      const o = { y, z, slack: 0.02, spout: 0, maxH }
-      if (!r) {
-        addBottleRow(c, bx0 + 0.02, bx1 - 0.02, o)
-        return
-      }
-      const a = r.x0 / K - 0.012
-      const b = r.x1 / K + 0.012
-      if (a - (bx0 + 0.02) > 0.09) addBottleRow(c, bx0 + 0.02, a, o)
-      if (bx1 - 0.02 - b > 0.09) addBottleRow(c, b, bx1 - 0.02, o)
-    }
-    const rowOf = (s: NamedRow['section'], y: number) => rows.find(r => r.section === s && Math.abs(r.y - y) < 1e-3)
-
     // ── AMERICAN: the brick bay over two walnut shelves (ref2) ──
     {
       const [b0, b1] = BAYS.american
       const bx = (b0 + b1) / 2
       addBrickPanel(c, b1 - b0, BRICK_H, { x: bx, y: CY, z: WZ, ...BRICK })
       A.brick = new THREE.Vector3(bx, CY + BRICK_H / 2, WZ)
-      for (let i = 0; i < 3; i++) {
-        const y = SHELF_Y[i]
-        if (i < 2) addShelf(c, b1 - b0, 0.22, { x: bx, y, z: WZ })
-        const above = i === 0 ? H - HEAD - 0.62 : SHELF_Y[i - 1] - 0.032
-        fill(b0, b1, rowOf('american', y), y, above - y)
-      }
+      // the beer on these shelves is bottles.ts's
+      for (let i = 0; i < 2; i++) addShelf(c, b1 - b0, 0.22, { x: bx, y: SHELF_Y[i], z: WZ })
     }
 
     // ── INTERNATIONAL: a wide walnut bay, three shelves, LPs packed over them ──
@@ -196,12 +181,7 @@ export function makeCellarBar(rows: NamedRow[], mobile: boolean): CellarBar {
       const [b0, b1] = BAYS.international
       const bx = (b0 + b1) / 2
       const lpY = 2.36
-      for (let i = 0; i < 3; i++) {
-        const y = SHELF_Y[i]
-        if (i < 2) addShelf(c, b1 - b0, 0.22, { x: bx, y, z: WZ })
-        const above = i === 0 ? lpY - 0.032 : SHELF_Y[i - 1] - 0.032
-        fill(b0, b1, rowOf('international', y), y, above - y)
-      }
+      for (let i = 0; i < 2; i++) addShelf(c, b1 - b0, 0.22, { x: bx, y: SHELF_Y[i], z: WZ })
       addRecordShelf(c, b0, b1, { y: lpY, z: WZ, rows: 1, top: true, sides: true })
       A.intlRecords = new THREE.Vector3(bx, lpY + 0.16, WZ + 0.34)
     }
@@ -211,9 +191,7 @@ export function makeCellarBar(rows: NamedRow[], mobile: boolean): CellarBar {
       const [b0, b1] = BAYS.local
       const bx = (b0 + b1) / 2
       addShelf(c, b1 - b0, 0.24, { x: bx, y: LOCAL_SHELF, z: WZ })
-      const top = 1.88
-      addShelf(c, b1 - b0, 0.24, { x: bx, y: top, z: WZ })
-      addBottleRow(c, b0 + 0.03, b1 - 0.03, { y: top, z: WZ + 0.12, slack: 0.03, spout: 0, maxH: 0.34 })
+      addShelf(c, b1 - b0, 0.24, { x: bx, y: LOCAL_TOP, z: WZ })
       const seat = addHifi(c, { x: HIFI_KX, y: CY, z: WZ + 0.235, d: 0.3 })
       A.turntable = seat
       turntable = makeTurntable({ finish: 'black', shadows: false, contact: false })

@@ -13,7 +13,7 @@ import { leanAgainst, onFonts, syncVinylLights } from '../../kit/vinyl'
 import { makeWineTower, type WineTower } from './wine'
 import { makeSlot, SPECS, type CocktailSlot } from './cocktails'
 import { CellarHud, layoutOf, type BeatState } from './hud'
-import { AM, ANCHORS, COCK, HEAD_IN, HEAD_OUT, INTL, LOC, OUT, POUR, SLOT, WINE_T, cocktailPos, intlPage } from './timeline'
+import { AM, ANCHORS, COCK, HEAD_IN, HEAD_OUT, INTL, LOC, OUT, POUR0, POUR_DUR, POUR_STEP, SLOT, WINE_CARD, WINE_T, cocktailPos, intlPage } from './timeline'
 import './cellar.css'
 
 /*
@@ -83,7 +83,7 @@ const SHOTS: [number, Shot][] = [
   // settled frame shows the column close up, or one bay under the other's card…
   [LOC[0], S(LX, LOCAL_Y + 0.85, Z, 9.0, -0.14, 0.05, 32, 0.45, 0, 1.25)],
   // …then a macro on the two bottles, and out to the "Bottles" LP beside them
-  [LOC[0] + 0.012, S(LX, LOCAL_Y + 1.02, Z, 3.6, -0.16, 0.06, 30, 0.35, 0, 1.5)],
+  [LOC[0] + 0.012, S(LX - 0.18, LOCAL_Y + 1.02, Z, 3.6, -0.16, 0.06, 30, 0.35, 0, 1.5)],
   [LOC[1] - 0.004, S((LX + LP_X) / 2 + 0.2, LOCAL_Y + 1.1, Z, 7.4, -0.2, 0.05, 30, 0.4, 0, 1.6)],
   // wine: the tower pours
   [WINE_T[0] + 0.014, S(WINE_AT.x, 1.5, WINE_AT.z, 7.2, -0.14, 0.1, 32, 0.36, 0, 1.55)],
@@ -150,7 +150,8 @@ export default function cellar(): Chapter {
   let tallNow = false
   let q = 0
   const tmp = new THREE.Vector3()
-  const state: BeatState = { beat: null, page: 0, cocktail: 0, head: false }
+  const state: BeatState = { beat: null, page: 0, cocktail: 0, head: null, item: -1 }
+  const litAt = new THREE.Vector3()
   const pour = [0, 0, 0]
   const cards: THREE.Mesh[] = []
 
@@ -308,25 +309,46 @@ export default function cellar(): Chapter {
       const reduced = frame.reducedMotion
 
       // ---- beats ----
-      state.head = local > HEAD_IN - 0.004 && q < HEAD_OUT && local < HEAD_OUT + 0.01
+      state.head =
+        local > HEAD_IN - 0.004 && q < HEAD_OUT && local < HEAD_OUT + 0.01 ? 'bottles'
+        : q >= WINE_T[0] && q < WINE_CARD ? 'wine'
+        : null
       state.beat =
         q >= AM[0] && q < AM[1] ? 'american'
         : q >= INTL[0] && q < INTL[1] ? 'international'
         : q >= LOC[0] && q < LOC[1] ? 'local'
-        : q >= WINE_T[0] && q < WINE_T[1] ? 'wine'
+        : q >= WINE_CARD && q < WINE_T[1] ? 'wine'
         : q >= COCK[0] && q < OUT + 0.02 && local < 0.975 ? 'cocktails'
         : null
       state.page = intlPage(q)
       const pos = cocktailPos(q)
       state.cocktail = Math.round(pos)
-      hud.update(state, frame.width, frame.height)
-
-      // ---- wine: staggered pours ----
-      for (let i = 0; i < 3; i++) {
-        const a = POUR[0] + i * 0.012
-        pour[i] = clamp((q - a) / (POUR[1] - POUR[0] - 0.024))
-      }
+      // ---- wine: the taps pour in turn ----
+      for (let i = 0; i < 3; i++) pour[i] = clamp((q - (POUR0 + i * POUR_STEP)) / POUR_DUR)
       tower.set(pour, t, reduced)
+      // ---- the item the 3D singles out (amber in its list, the key light on it) ----
+      shotAt(q, _shot)
+      state.item = -1
+      const g = state.beat
+      if (g === 'american' || g === 'international' || g === 'local') {
+        // the bottle the camera settles on: the named one nearest the shot's subject
+        let best = Infinity
+        wall.named[g].forEach((v, i) => {
+          if (!v) return
+          const dx = v.x - _shot.x
+          const dy = (v.y - _shot.y) * 2
+          const d = dx * dx + dy * dy
+          if (d < best) {
+            best = d
+            state.item = i
+            litAt.copy(v)
+          }
+        })
+      } else if (g === 'wine') {
+        // the wine pouring (the last tap to start)
+        for (let i = 0; i < 3; i++) if (q >= POUR0 + i * POUR_STEP) state.item = i
+      }
+      hud.update(state, frame.width, frame.height)
 
       // ---- cocktails: two slots alternate by parity ----
       const i0 = Math.floor(pos)
@@ -379,15 +401,17 @@ export default function cellar(): Chapter {
       w.env = 1.1
       // the softbox strips sweep across the glass as the camera tracks
       w.envTurn = -0.6 + q * 3.2
-      shotAt(q, _shot)
       const sub = tmp.set(_shot.x, _shot.y, _shot.z)
+      const onBottle = state.item >= 0 && (g === 'american' || g === 'international' || g === 'local')
       const fin = smoothstep(0.93, 0.99, local)
       // cream sleeves bloom under a hot key: keep it ≈ 0.5–0.7 near the vinyl
       const nearLP = q > LOC[0] - 0.01 && q < LOC[1] + 0.004
-      w.spot = (nearLP ? 0.32 : inBottles ? 0.42 : cocktails ? 0.72 : 0.7) * (1 - 0.45 * fin)
+      // in the bottle beats the key picks out the bottle the list lights (a tight pool, damped by the world)
+      w.spot = (onBottle ? 0.5 : nearLP ? 0.32 : inBottles ? 0.42 : cocktails ? 0.72 : 0.7) * (1 - 0.45 * fin)
       w.spotColor = GEL.tungsten
-      w.spotAngle = inBottles ? 0.5 : 0.36
-      w.spotPenumbra = 0.7
+      w.spotAngle = onBottle ? 0.13 : inBottles ? 0.5 : 0.36
+      w.spotPenumbra = onBottle ? 0.85 : 0.7
+      if (onBottle) sub.copy(litAt)
       w.spotPos.set(sub.x + 2.5, sub.y + 7.5, sub.z + 7)
       w.spotAt.copy(sub)
       w.rimA = cocktails ? 1.6 : 1.2

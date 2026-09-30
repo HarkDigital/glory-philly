@@ -154,6 +154,34 @@
 .cel .cel-list li.is-row .cel-n {
   color: var(--amber-hot);
 }
+/* the item the 3D singles out (a bottle the camera settles on, the wine
+   pouring): amber name + number, a small amber dot — no layout shift */
+.cel .cel-list li,
+.cel .cel-wine-list li {
+  position: relative;
+}
+.cel .cel-list li::before,
+.cel .cel-wine-list li::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 0.55em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--amber-hot);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.cel .cel-list li.is-on,
+.cel .cel-list li.is-on .cel-n,
+.cel .cel-wine-list li.is-on {
+  color: var(--amber-hot);
+}
+.cel .cel-list li.is-on::before,
+.cel .cel-wine-list li.is-on::before {
+  opacity: 1;
+}
 .cel .cel-pager {
   margin: 14px 0 0;
 }
