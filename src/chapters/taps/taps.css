@@ -37,9 +37,9 @@
 
 .taps-stage .taps-lead {
   margin: 4px 0 0;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: clamp(1.25rem, 1.75vw, 1.7rem);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: clamp(1.15rem, 1.6vw, 1.55rem);
   line-height: 1.28;
   color: var(--fg);
   max-width: 30ch;

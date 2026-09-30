@@ -25,7 +25,8 @@ export const BRAND = {
   neighborhood: 'Old City',
   phone: '(267) 687-7878',
   phoneHref: 'tel:+12676877878',
-  email: 'systemadmin@gloryphilly.com',
+  /** every contact on the site goes to Dave (Mike, 2026-09-30: never show systemadmin@) */
+  email: 'dave@gloryphilly.com',
   mapUrl: 'https://www.google.com/maps/search/?api=1&query=Glory+Beer+Bar+%26+Kitchen+126+Chestnut+St+Philadelphia+PA+19106',
   website: 'https://www.gloryphilly.com/',
   /** the red "G" roundel (the site icon) */

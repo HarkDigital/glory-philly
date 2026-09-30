@@ -9,8 +9,8 @@
       bar-after-dark stout black, foam cream, beer amber, exposed brick, and
       GLORY RED (the sign, the G roundel) used like a stamp, sparingly.
       Type: Alfa Slab One for display (the heavy slab of the painted wall
-      sign), Instrument Serif italic for the accent word (Resonance's
-      editorial voice), Inter Tight for reading and, in tracked caps, for prices,
+      sign; its accent word is the same slab in amber — no italic
+      serif swaps in headlines), Inter Tight for reading and, in tracked caps, for prices,
       tap numbers and labels.
 
    Rules learned the hard way: no color-mix() (Safari 15 + the minifier drops
@@ -264,8 +264,8 @@ a {
 }
 
 /* display: Alfa Slab One — the heavy slab of the painted sign, tight; the
-   accent word turns to Instrument Serif italic (Resonance's editorial accent)
-   filled with the beer gradient */
+   accent word stays in the same slab, filled with the beer gradient (no
+   italic/serif swap — Mike doesn't want that look in headlines) */
 .hud-title {
   font-family: var(--font-display);
   font-weight: 400;
@@ -288,14 +288,16 @@ a {
 }
 .hud-title em,
 .hud-h2 em {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  font-size: 1.12em;
-  line-height: 0.85;
-  padding: 0 0.08em 0.06em 0.02em;
-  margin: 0 -0.04em 0 0;
+  /* the accent word stays in the headline's own slab — colour only, never an
+     italic/serif swap (Mike, 2026-09-30) */
+  font-family: inherit;
+  font-style: normal;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  font-size: 1em;
+  line-height: inherit;
+  padding: 0;
+  margin: 0;
   color: var(--amber-hot);
 }
 @supports (-webkit-background-clip: text) or (background-clip: text) {
@@ -325,9 +327,9 @@ a {
 }
 
 .hud-quote {
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-weight: 400;
+  font-family: var(--font-sans);
+  font-style: normal;
+  font-weight: 500;
   font-size: clamp(1.3rem, 2.2vw, 2.05rem);
   line-height: 1.28;
   letter-spacing: -0.006em;
@@ -433,8 +435,8 @@ a {
   font-family: var(--font-mono);
 }
 .hud-script {
-  font-family: var(--font-serif);
-  font-style: italic;
+  font-family: var(--font-sans);
+  font-weight: 600;
   color: var(--amber-hot);
 }
 
