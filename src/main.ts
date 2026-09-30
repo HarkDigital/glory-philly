@@ -1,11 +1,9 @@
 // GLORY fonts: Alfa Slab One (display — the heavy slab of a painted wall
-// sign: GLORY on the brick), Inter Tight + Instrument Serif italic (after
-// Resonance: editorial reading type with a serif accent), Inter Tight caps
-// (prices, tap numbers, the HUD).
+// sign: GLORY on the brick), Inter Tight for reading, and Inter Tight caps
+// for prices, tap numbers and the HUD. No serif/italic accent face and no
+// IBM Plex Mono (Mike, 2026-09-30).
 import '@fontsource/alfa-slab-one'
 import '@fontsource-variable/inter-tight'
-import '@fontsource/instrument-serif/400.css'
-import '@fontsource/instrument-serif/400-italic.css'
 import './styles/base.css'
 import './ui/ui.css'
 

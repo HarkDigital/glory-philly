@@ -13,7 +13,7 @@ import { publishTextures } from './texture'
  * if boot fails or the GPU context is gone for good): every chapter's copy,
  * in story order, visible — set like Glory itself: cream type on stout
  * black, Alfa Slab One headings (the painted wall sign), the accent word in
- * Instrument Serif italic in beer amber, Inter Tight for reading and, in caps,
+ * the same slab in beer amber, Inter Tight for reading and, in caps,
  * for the small print, the red G roundel as the stamp. Each chapter is a
  * numbered room ("03 · The Kitchen") on the brick; the house's own photos sit
  * where they belong (the wall sign on the welcome, the plates beside the
@@ -188,8 +188,8 @@ export function renderFallback(root: HTMLElement) {
 }
 
 /**
- * The heading's last word becomes the accent: Instrument Serif italic in
- * beer amber ("All Day <em>Menu</em>"). Only the markup changes; the
+ * The heading's last word becomes the accent: the same slab in beer amber
+ * ("All Day <em>Menu</em>") — never an italic serif. Only the markup changes; the
  * heading reads exactly as before.
  */
 function accentHeading(copy: HTMLElement) {

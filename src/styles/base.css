@@ -48,9 +48,10 @@
   --panel: rgba(16, 10, 7, 0.86);
 
   --font-display: 'Alfa Slab One', 'Rockwell', 'Georgia', serif;
-  --font-serif: 'Instrument Serif', 'Times New Roman', serif;
-  /* the accent word is Instrument Serif italic (kept under the donor's name) */
-  --font-script: var(--font-serif);
+  /* no serif/italic accent face on this site (Mike, 2026-09-30): legacy names
+     point at the display slab so nothing can fall back to an italic serif */
+  --font-serif: var(--font-display);
+  --font-script: var(--font-display);
   --font-sans: 'Inter Tight Variable', 'Inter Tight', system-ui, sans-serif;
   /* labels, prices, tap numbers: Inter Tight in tracked caps (no monospace face on
      this site — Mike never wants IBM Plex Mono) */
