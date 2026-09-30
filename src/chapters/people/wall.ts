@@ -14,7 +14,7 @@ import { makeSleeve, makeRecord, SEVEN, REC12, REC7, type Sleeve, type Record as
  */
 
 /** where each person's display hangs (the sleeve's centre x) */
-export const FRAME_X = [0, 6.6, 13.2]
+export const FRAME_X = [0, 3.8, 7.6]
 /** the display rails' height on the wall */
 export const RAIL_Y = 1.1
 /** world size of a 12" sleeve on this wall */

@@ -72,7 +72,8 @@ const HOLDS: [number, number][] = [
   [0.97, 1.0],
 ]
 
-const PINT_X = FRAME_X[2] + 1.15
+/** the stout stands on the ledge just past Pier's display (clear of it, so the out-beat frames it alone) */
+const PINT_X = FRAME_X[2] + 3.3
 
 interface Card {
   root: HTMLElement
@@ -220,24 +221,128 @@ export default function create(): Chapter {
     out.pos.set(out.tgt.x + swing * d, out.tgt.y + lift * d, z + d)
   }
 
+  const _cam = new THREE.PerspectiveCamera()
+  const _min = new THREE.Vector3()
+  const _max = new THREE.Vector3()
+  const _dir = new THREE.Vector3()
+  const _tgt = new THREE.Vector3()
+  const _v = new THREE.Vector3()
+  const _right = new THREE.Vector3()
+  const _up = new THREE.Vector3()
+  const _b = { x0: 0, x1: 0, y0: 0, y1: 0, ok: true }
+
+  function place(tgt: THREE.Vector3, d: number) {
+    _cam.position.copy(tgt).addScaledVector(_dir, d)
+    _cam.lookAt(tgt)
+    _cam.updateMatrixWorld()
+  }
+  /** NDC bounds of the box's corners through _cam */
+  function bounds(min: THREE.Vector3, max: THREE.Vector3) {
+    _b.x0 = _b.y0 = Infinity
+    _b.x1 = _b.y1 = -Infinity
+    _b.ok = true
+    for (let i = 0; i < 8; i++) {
+      _v.set(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z).project(_cam)
+      if (_v.z > 1 || _v.z < -1) _b.ok = false
+      _b.x0 = Math.min(_b.x0, _v.x)
+      _b.x1 = Math.max(_b.x1, _v.x)
+      _b.y0 = Math.min(_b.y0, _v.y)
+      _b.y1 = Math.max(_b.y1, _v.y)
+    }
+    return _b
+  }
+
+  /**
+   * Fit a world box into a screen rect (px) from a given view direction
+   * (yaw: + = camera to the right of the box, pitch: + = above it), by
+   * projection: bisect the distance, then slide the view so the box's
+   * projected centre sits at the rect's centre.
+   */
+  function fitView(out: Pose, min: THREE.Vector3, max: THREE.Vector3, x0: number, y0: number, x1: number, y1: number, fill: number, fov: number, yaw: number, pitch: number) {
+    _cam.fov = fov
+    _cam.aspect = L.W / L.H
+    _cam.near = 0.05
+    _cam.far = 500
+    _cam.updateProjectionMatrix()
+    _dir.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch))
+    const rx0 = (2 * x0) / L.W - 1
+    const rx1 = (2 * x1) / L.W - 1
+    const ry0 = 1 - (2 * y1) / L.H
+    const ry1 = 1 - (2 * y0) / L.H
+    const rw = (rx1 - rx0) * fill
+    const rh = (ry1 - ry0) * fill
+    _tgt.copy(min).add(max).multiplyScalar(0.5)
+    let d = 20
+    for (let pass = 0; pass < 3; pass++) {
+      let lo = 0.5
+      let hi = 300
+      for (let k = 0; k < 26; k++) {
+        const mid = (lo + hi) / 2
+        place(_tgt, mid)
+        const b = bounds(min, max)
+        if (b.ok && b.x1 - b.x0 <= rw && b.y1 - b.y0 <= rh) hi = mid
+        else lo = mid
+      }
+      d = hi
+      place(_tgt, d)
+      const b = bounds(min, max)
+      const dx = (rx0 + rx1) / 2 - (b.x0 + b.x1) / 2
+      const dy = (ry0 + ry1) / 2 - (b.y0 + b.y1) / 2
+      const halfH = d * Math.tan(THREE.MathUtils.degToRad(fov / 2))
+      const halfW = halfH * _cam.aspect
+      _right.setFromMatrixColumn(_cam.matrixWorld, 0)
+      _up.setFromMatrixColumn(_cam.matrixWorld, 1)
+      _tgt.addScaledVector(_right, -dx * halfW).addScaledVector(_up, -dy * halfH)
+    }
+    out.tgt.copy(_tgt)
+    out.pos.copy(_tgt).addScaledVector(_dir, d)
+  }
+
+  /** true when nothing of the display rail above the stout is in this view */
+  function clearAbove(p: Pose, fov: number) {
+    _cam.fov = fov
+    _cam.aspect = L.W / L.H
+    _cam.updateProjectionMatrix()
+    _cam.position.copy(p.pos)
+    _cam.lookAt(p.tgt)
+    _cam.updateMatrixWorld()
+    // the display's lowest edge (rail) and its record's reach
+    const d = displays[2]
+    for (let k = 0; k <= 8; k++) {
+      const x = FRAME_X[2] + lerp(d.left, d.right, k / 8)
+      for (const [y, z] of [[RAIL_Y - 0.08, 0.18], [RAIL_Y + 0.6, 0.12]]) {
+        _v.set(x, y, z).project(_cam)
+        if (_v.z < 1 && _v.x > -1.02 && _v.x < 1.02 && _v.y > -1.02 && _v.y < 1.02) return false
+      }
+    }
+    return true
+  }
+
   function buildPoses() {
     const { W, H, safeTop, safeBottom, gutter } = L
     const fov = L.portrait ? 34 : 30
-    // the wall: all three displays (and the ledge) above the headline
+    // THE WALL, above the headline. Desktop / landscape: straight on, the
+    // three displays + the single + the stout ledge spanning the width.
+    // Portrait: a three-quarter view down the wall from the left, Dave near
+    // and large, Kevin beyond him, the single and Pier entering at the edge.
     const d0 = displays[0]
     const d2 = displays[2]
-    const wideTop = RAIL_Y + d0.top + 0.15
-    const wideBot = -0.25
-    const x0 = FRAME_X[0] + d0.left - 0.2
-    const x1 = FRAME_X[2] + d2.right + 0.2
-    const y1 = Math.max(safeTop + 120, L.headTop - 14)
-    // (portrait: Kevin's display and the single whole, Dave and Pier cut by the edges)
-    const kc = FRAME_X[1] + (displays[1].left + displays[1].right) / 2
-    const wideW = L.portrait ? 5.4 : x1 - x0
-    const wideX = L.portrait ? kc + 0.8 : (x0 + x1) / 2
-    const wb = L.portrait ? RAIL_Y - 0.9 : wideBot
-    fit(poses.wide, wideX, (wideTop + wb) / 2, wideW, wideTop - wb, 0, gutter, safeTop, W - gutter, y1, L.portrait ? 1.0 : 0.96, fov, -0.02, 0.03)
-    poses.wide.lamps = [0.8, 0.8, 0.8]
+    const sTop = single.group.position.y + single.top
+    const top = Math.max(RAIL_Y + d0.top, sTop) + 0.12
+    const y1 = Math.max(safeTop + 120, L.headTop - 18)
+    if (L.portrait) {
+      // Dave whole and near; Kevin's sleeve beyond him (his record, the
+      // single and Pier run on past the edge)
+      _min.set(FRAME_X[0] + d0.left - 0.05, RAIL_Y - 0.15, 0)
+      _max.set(FRAME_X[1] + 0.2, RAIL_Y + d0.top + 0.05, 0.3)
+      fitView(poses.wide, _min, _max, gutter, safeTop + 8, W - gutter, y1, 1.02, fov, -0.95, 0.06)
+    } else {
+      // (the ledge runs along below; the displays are the subject)
+      _min.set(FRAME_X[0] + d0.left - 0.15, RAIL_Y - 0.55, 0)
+      _max.set(FRAME_X[2] + d2.right + 0.15, top, 0.3)
+      fitView(poses.wide, _min, _max, gutter, safeTop, W - gutter, y1, 0.98, fov, 0.06, 0.04)
+    }
+    poses.wide.lamps = [1, 1, 1]
     // each display: beside its liner notes (desktop) or above them (portrait)
     for (let i = 0; i < 3; i++) {
       const d = displays[i]
@@ -256,8 +361,16 @@ export default function create(): Chapter {
       poses.p[i].lamps = [0.3, 0.3, 0.3]
       poses.p[i].lamps[i] = 1
     }
-    // the stout on the ledge, low and close
-    fit(poses.pint, PINT_X, 0.42, 1.5, 1.3, 0.2, gutter, safeTop, W - gutter, H - safeBottom, 0.62, fov, -0.12, 0.12)
+    // the stout on the ledge, close and a touch from above, near enough that
+    // Pier's display (up and to the left) stays wholly out of frame
+    _min.set(PINT_X - 0.42, -0.06, 0.0)
+    _max.set(PINT_X + 0.42, 0.86, 0.42)
+    let fillP = L.portrait ? 0.8 : 0.66
+    for (let k = 0; k < 8; k++) {
+      fitView(poses.pint, _min, _max, gutter, safeTop, W - gutter, H - safeBottom, fillP, fov, -0.12, 0.1)
+      if (clearAbove(poses.pint, fov)) break
+      fillP = Math.min(0.98, fillP + 0.05)
+    }
     poses.pint.lamps = [0.3, 0.3, 0.55]
   }
 
@@ -412,11 +525,16 @@ export default function create(): Chapter {
         lamp: false,
         seed: 3,
       })
-      single.group.position.set((FRAME_X[1] + FRAME_X[2]) / 2 - 0.2, RAIL_Y + 0.95, 0)
+      // hung high in the gap between Kevin's and Pier's displays (salon style)
+      const gap = (FRAME_X[1] + displays[1].right + FRAME_X[2] + displays[2].left) / 2
+      single.group.position.set(gap - (single.left + single.right) / 2, RAIL_Y + 1.78, 0)
       group.add(single.group)
 
-      const ledge = makeLedge(FRAME_X[2] - FRAME_X[0] + 5)
-      ledge.position.set(FRAME_X[1], 0, 0)
+      // the ledge runs from left of Dave to past the stout
+      const l0 = FRAME_X[0] - 2.5
+      const l1 = PINT_X + 2.2
+      const ledge = makeLedge(l1 - l0)
+      ledge.position.set((l0 + l1) / 2, 0, 0)
       group.add(ledge)
 
       pint = makeGlass({ shape: 'pint', beer: BEERS.stout, scale: 0.72, fill: 0.95, head: 0.09 })
@@ -436,8 +554,10 @@ export default function create(): Chapter {
 
     update(local: number, frame: Frame, ctx: ChapterContext) {
       q = clock.update(local, frame.dt)
-      if (dirty) measure()
-      buildPoses()
+      if (dirty) {
+        measure()
+        buildPoses()
+      }
       poseAt(q, cur)
       updateDom(q)
 
@@ -463,7 +583,7 @@ export default function create(): Chapter {
       w.bokeh = 0
       w.beams = 0
       // the key: a dim tungsten spot from high front-left, following the camera
-      w.spot = 0.24
+      w.spot = 0.3
       w.spotColor = GEL.tungsten
       w.spotPos.set(cur.tgt.x - 3.5, 8.5, 8)
       w.spotAt.set(cur.tgt.x, 1.4, 0)
