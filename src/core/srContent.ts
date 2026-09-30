@@ -1,5 +1,5 @@
 import {
-  BAR, BOTTLES, BRAND, COCKTAILS, CREDIT, DRAFTS, EVENTS, HOURS, KITCHEN_HOURS, LINKS, MENU, PEOPLE, RESERVATIONS, SECTIONS, SOCIALS, WINE, eventInquiryHref,
+  BAR, BOTTLES, BRAND, CITY_WIDE, COCKTAILS, CREDIT, DRAFTS, EVENTS, HOURS, KITCHEN_HOURS, LINKS, MENU, PEOPLE, RESERVATIONS, SECTIONS, SOCIALS, WINE, eventInquiryHref,
 } from '../content'
 
 /*
@@ -48,6 +48,12 @@ const COPY: Record<string, () => string> = {
     ${DRAFTS.map((g, i) => `<h4>${stop('taps', i, g.title)}</h4><ul>${g.beers.map(b => `<li>${esc(b)}</li>`).join('')}</ul>`).join('')}
     <p>Last Update: ${esc(BAR.lastUpdate)}</p>
     <p>${ext(LINKS.app.url, BAR.app)} · ${ext(LINKS.untappd.url, LINKS.untappd.label)}</p>`,
+
+  citywide: () => `
+    <p>${esc(SECTIONS.citywide.eyebrow)}</p>
+    <h2 tabindex="0">${esc(CITY_WIDE.title)}</h2>
+    <p>${esc(CITY_WIDE.line)}</p>
+    <ul>${CITY_WIDE.items.map(i => `<li>${esc(i.detail)} ${esc(i.name)}</li>`).join('')}</ul>`,
 
   kitchen: () => `
     <p>${esc(SECTIONS.kitchen.eyebrow)}</p>

@@ -411,6 +411,7 @@ export const PHOTOS = {
 /** Section eyebrows + headlines (headlines are the site's own section names). */
 export const SECTIONS = {
   taps: { eyebrow: 'The Bar', title: '36 beers on tap.' },
+  citywide: { eyebrow: 'A shot and a beer', title: 'City Wide Special' },
   kitchen: { eyebrow: 'The Kitchen', title: 'All Day Menu' },
   cellar: { eyebrow: 'Bottles · Wine · Cocktails', title: 'Wine & Specialty Cocktails' },
   people: { eyebrow: 'About', title: 'The people behind the bar.' },
@@ -501,4 +502,24 @@ export const CELLAR_UI = {
 export const PEOPLE_UI = {
   /** the bio panel's eyebrow (the panels are the records' liner notes) */
   notes: 'Liner notes',
+}
+
+// ─── CITY WIDE SPECIAL ──────────────────────────────────────────────────────
+
+/**
+ * Glory's City Wide Special, from Mike (2026-09-30) with a photo taken at the
+ * bar: a can of Hamm's, a shot of Old Overholt Rye, and a cube of Swiss cheese
+ * on a pick across the rim of the shot glass. No price was given — don't show
+ * one. The can is Hamm's classic blue livery (white crown band with gold pines,
+ * red "Hamm's" script, "BEER", "The beer...refreshing!" / "From the land of
+ * sky blue waters"); the shot is a small heavy-based rocks/shot glass.
+ */
+export const CITY_WIDE = {
+  title: 'City Wide Special',
+  line: "A can of Hamm's, a shot of Old Overholt Rye, and a cube of Swiss cheese.",
+  items: [
+    { id: 'beer', name: "Hamm's", detail: 'A can of' },
+    { id: 'shot', name: 'Old Overholt Rye', detail: 'A shot of' },
+    { id: 'cheese', name: 'Swiss cheese', detail: 'A cube of' },
+  ],
 }

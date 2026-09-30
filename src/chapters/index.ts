@@ -17,12 +17,14 @@ import type { ChapterDef } from '../core/types'
  * The ids are shared with src/core/srContent.ts (its anchor contract) and the
  * chrome's names.
  */
-/** ?lab=vinyl swaps the hero for the vinyl kit's lab (src/chapters/lab-vinyl.ts) */
+/** ?lab=vinyl | room | citywide swaps the hero for a kit lab (src/chapters/lab-*.ts) */
 const LAB = new URLSearchParams(location.search).get('lab')
 
 export const CHAPTERS: ChapterDef[] = [
-  { id: 'hero', label: 'This Must Be the Place', length: 2.4, landing: 0, intro: 0, load: () => (LAB === 'vinyl' ? import('./lab-vinyl') : import('./hero/index')) },
+  { id: 'hero', label: 'This Must Be the Place', length: 2.4, landing: 0, intro: 0, load: () =>
+      LAB === 'vinyl' ? import('./lab-vinyl') : LAB === 'room' ? import('./lab-room') : LAB === 'citywide' ? import('./lab-citywide') : import('./hero/index') },
   { id: 'taps', label: 'On Tap', length: 5.6, landing: 0.07, intro: 0.07, load: () => import('./taps/index') },
+  { id: 'citywide', label: 'City Wide', length: 2.4, landing: 0.1, intro: 0.1, load: () => import('./citywide/index') },
   { id: 'kitchen', label: 'The Kitchen', length: 9.6, landing: 0.07, intro: 0.07, load: () => import('./kitchen/index') },
   { id: 'cellar', label: 'The Cellar', length: 8.2, landing: 0.07, intro: 0.07, load: () => import('./cellar/index') },
   { id: 'people', label: 'The Crew', length: 3.8, landing: 0.07, intro: 0.07, load: () => import('./people/index') },
@@ -34,6 +36,7 @@ export const CHAPTERS: ChapterDef[] = [
 export const NAV_NAMES: Record<string, string> = {
   hero: 'Home',
   taps: 'Bar',
+  citywide: 'City Wide',
   kitchen: 'Kitchen',
   cellar: 'Bottles & Cocktails',
   people: 'About',
