@@ -126,10 +126,10 @@ const phaseIn = (i: number, q: number) => clamp((q - A[i]) / (A[i + 1] - A[i]))
 function rigAt(i: number, q: number): { item: number; riffle: number } {
   const p = PLAN[i]
   if (q < A[i]) return { item: -1, riffle: 0 }
-  if (q >= A[i + 1]) return { item: p.items, riffle: p.riffle ? p.riffle + 0.95 : 0 }
+  if (q >= A[i + 1]) return { item: p.items, riffle: p.riffle ? p.riffle - 0.05 : 0 }
   const u = phaseIn(i, q) * p.weight
   if (u < p.items) return { item: u, riffle: 0 }
-  return { item: p.items, riffle: ((u - p.items) / (p.weight - p.items)) * (p.riffle + 0.95) }
+  return { item: p.items, riffle: ((u - p.items) / (p.weight - p.items)) * (p.riffle - 0.05) }
 }
 
 interface Pose {
@@ -186,7 +186,7 @@ export default function kitchen(): Chapter {
   const pa = pose()
   const pb = pose()
   const pc = pose()
-  /** which bin the camera is at (fractional during a dolly; NSEC = the overview) */
+  /** which bin the camera is at (fractional during a dolly) */
   let camStation = 0
   /** real time until which the rigs' physics may still be settling (Motion-off heartbeat) */
   let settleUntil = 0
@@ -240,29 +240,45 @@ export default function kitchen(): Chapter {
     presentPose(i, pc)
     return blend(pa, pc, smoother(p), out)
   }
-  function introPose(out: Pose) {
-    // a wide look down the pass: the first bin near, the others receding
-    _c.set(stationX(0) + (tall ? 1.4 : 2.4), 0.5, -0.2)
-    dirOf(tall ? -34 : -42, tall ? 30 : 24, _d)
-    return frame(out, _c, _d, tall ? 5 : 7.5, 2.6, region, W, H, 30)
+  /**
+   * The opening: a low product-film dolly past the front of the Starters bin
+   * (its section sleeve face-out, the dish covers standing behind it, the pass
+   * glowing beyond), rising into the crate-digger view by the first section.
+   */
+  function introPose(u: number, out: Pose) {
+    const cr = bins[0].crate.group
+    cr.updateWorldMatrix(true, false)
+    const e = smoother(u)
+    _c.set(lerp(0.25, 0.1, e), lerp(0.5, 0.55, e), 0.3).applyMatrix4(cr.matrixWorld)
+    dirOf(lerp(tall ? -30 : -36, tall ? 4 : 8, e), lerp(7, 22, e), _d)
+    return frame(out, _c, _d, tall ? 1.75 : lerp(2.3, 2.1, e), lerp(1.25, 1.6, e), region, W, H, 30)
   }
-  function overviewPose(out: Pose) {
-    // looking back along the whole pass from past the last bin
-    _c.set(stationX(3) + 0.4, 0.45, -0.1)
-    dirOf(tall ? 40 : 50, tall ? 30 : 22, _d)
-    return frame(out, _c, _d, tall ? 5.2 : 7.5, tall ? 5 : 3, region, W, H, tall ? 34 : 30)
+  /**
+   * The ending: a close, lit shot of the Sweets bin (the last sweet standing
+   * face-out) with the dessert plate and the snifter, clear of the order card;
+   * a slow push in before the pour.
+   */
+  function endPose(u: number, out: Pose) {
+    const cr = bins[NSEC - 1].crate.group
+    cr.updateWorldMatrix(true, false)
+    _c.set(0.12, 0.42, 0.5).applyMatrix4(cr.matrixWorld)
+    const push = smoother(clamp((u - 0.45) / 0.55))
+    dirOf(lerp(-10, -4, push), lerp(20, 17, push), _d)
+    const k = lerp(1, 0.86, push)
+    return frame(out, _c, _d, (tall ? 2.35 : 2.45) * k, 1.3 * k, region, W, H, 30)
   }
   function computePose(qv: number, out: Pose) {
     if (qv < S0 + POST) {
-      introPose(pb)
+      const u = clamp(qv / (S0 + POST))
+      introPose(u, pb)
       stationPose(0, qv, out)
       camStation = 0
-      return blend(pb, out, smoother(qv / (S0 + POST)), out)
+      return blend(pb, out, smoothstep(0.78, 1, u), out)
     }
     if (qv > S1 - PRE) {
       stationPose(NSEC - 1, qv, pb)
-      overviewPose(out)
-      camStation = NSEC
+      endPose(clamp((qv - S1) / (1 - S1)), out)
+      camStation = NSEC - 1
       return blend(pb, out, smoother((qv - (S1 - PRE)) / (PRE + POST + 0.01)), out)
     }
     for (let i = 1; i < NSEC; i++) {
@@ -424,7 +440,7 @@ export default function kitchen(): Chapter {
       const beers: [number, Parameters<typeof makeGlass>[0], number, number][] = [
         [0, { shape: 'pint', beer: BEERS.gold, scale: 0.48, fill: 0.93, head: 0.09 }, -0.98, -0.25],
         [2, { shape: 'tulip', beer: BEERS.amber, scale: 0.5, fill: 0.9, head: 0.1 }, 0.95, 0.4],
-        [4, { shape: 'snifter', beer: BEERS.stout, scale: 0.5, fill: 0.62, head: 0.07 }, -0.98, 0.1],
+        [4, { shape: 'snifter', beer: BEERS.stout, scale: 0.5, fill: 0.62, head: 0.07 }, -0.84, 0.2],
       ]
       for (const [station, opt, dx, dz] of beers) {
         const g = makeGlass(opt)
@@ -438,7 +454,7 @@ export default function kitchen(): Chapter {
       fork.position.set(-0.3, 0.035, 0.1)
       fork.rotation.y = 0.45
       still.add(plate, fork)
-      still.position.set(stationX(4) + 1.0, 0, 0.55)
+      still.position.set(stationX(4) + 0.86, 0, 0.62)
       group.add(still)
 
       // ---- DOM
@@ -510,22 +526,23 @@ export default function kitchen(): Chapter {
       const s = sectionAt(q)
 
       // ---- light first (the rigs' groove highlights follow it)
-      const overview = q > S1 - PRE
-      const camX = overview ? stationX(2) : camStation * STEP
+      const camX = camStation * STEP
+      // the heat lamps' warm key; it eases down in the last beat, ahead of the pour
+      const fade = 1 - 0.35 * smoothstep(0.95, 1, local)
       const w = ctx.world.params
-      w.spot = 0.5
+      w.spot = 0.5 * fade
       w.spotColor = '#ffc486'
       w.spotPos.set(camX - 2.2, 7.5, 5.2)
       w.spotAt.set(camX, 0.6, 0.2)
-      w.spotAngle = overview ? 0.95 : 0.5
+      w.spotAngle = 0.5
       w.spotPenumbra = 0.7
-      w.rimA = 0.9
+      w.rimA = 0.9 * fade
       w.rimAColor = GEL.amber
       w.rimADir.set(-0.9, 0.5, -1)
       w.rimB = 0.55
       w.rimBColor = GEL.tungsten
       w.rimBDir.set(1, 0.35, -1)
-      w.fill = 0.26
+      w.fill = 0.26 * fade
       w.brick = 0.5
       w.bulbs = 0.7
       w.cyc = 0.45
@@ -559,10 +576,10 @@ export default function kitchen(): Chapter {
           g.matrix.multiply(_m.makeRotationY(Math.PI * smoother(t)))
           g.matrixWorldNeedsUpdate = true
         }
-        b.crate.group.visible = overview || Math.abs(i - camStation) < 1.45
+        b.crate.group.visible = Math.abs(i - camStation) < 1.45
       })
-      for (const { g, station } of glasses) g.group.visible = overview || Math.abs(station - camStation) < 1.2
-      still.visible = overview || camStation > 3.2
+      for (const { g, station } of glasses) g.group.visible = Math.abs(station - camStation) < 1.2
+      still.visible = camStation > 3.2
 
       computePose(q, camPose)
 
