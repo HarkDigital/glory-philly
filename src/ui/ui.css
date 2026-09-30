@@ -520,6 +520,11 @@
   gap: 18px;
   align-content: start;
 }
+.ch-menu-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .ch-menu-cta {
   justify-self: start;
   padding: 15px 22px;

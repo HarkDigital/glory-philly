@@ -20,7 +20,7 @@ import { publishTextures } from './texture'
  *   top-left      the red G ROUNDEL (the site icon, as vector) + "Glory" in
  *                 Alfa Slab One over "Beer Bar & Kitchen" in mono caps
  *                 (→ lands on the hero).
- *   top-right     Bar · Kitchen · Events · Visit (NAV_NAMES) on one plate,
+ *   top-right     Menu ↗ (printable menu) · Events · Visit on one plate,
  *                 each with a small amber dot that lights for the chapter on
  *                 screen, then "Make a Reservation" (the Glory-red pill,
  *                 external: Toast). ≤ 900 px the plate folds into one Menu
@@ -48,10 +48,14 @@ import { publishTextures } from './texture'
  * Navigation always uses engine.land(id) (lands on settled copy; long jumps cut).
  */
 
-/** the primary nav on desktop (business names, in story order) */
-const NAV = ['taps', 'kitchen', 'events', 'visit']
-/** nav items that open gloryphilly.com's printable menu instead of landing on their chapter (Mike, 2026-09-30; the fallback page's header too) */
-export const MENU_LINKS: Record<string, string> = { taps: 'Bar menu', kitchen: 'Kitchen menu' }
+/** the primary nav on desktop: one "Menu" (gloryphilly.com's printable menu, new tab), then chapters */
+const NAV = ['events', 'visit']
+/**
+ * One "Menu" link for food and drink (Mike, 2026-09-30: Bar and Kitchen both
+ * opened the same printable menu, so they're combined). Also used by the
+ * menu dialog ("See the menu") and the fallback page's header.
+ */
+export const MENU_LINK = { label: 'Menu', cta: 'See the menu', aria: 'Food and drink menu (opens in a new tab)' }
 /** the story as a record's tracklist: side A is the first half (rounded up), side B the rest — A1 … A4, B1 … B3 */
 export const trackCode = (i: number, total: number) => {
   const a = Math.ceil(total / 2)
@@ -113,15 +117,12 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
   const reserve = (cls: string) =>
     `<a class="hud-btn ${cls}" href="${esc(LINKS.reserve.url)}" target="_blank" rel="noopener" data-reserve><span>${esc(LINKS.reserve.label)}</span>${EXT_IC}${NEW_TAB}</a>`
 
-  const menuLink = (id: string, cls: string, inner: string) =>
-    `<a class="${cls}" href="${esc(LINKS.menus.url)}" target="_blank" rel="noopener" data-menu-link aria-label="${esc(MENU_LINKS[id])} (opens in a new tab)">${inner}</a>`
-  const links = NAV.filter(id => indexOf(id) >= 0)
-    .map(id =>
-      MENU_LINKS[id]
-        ? `<li>${menuLink(id, 'ch-link', `<i class="ch-led" aria-hidden="true"></i><span>${esc(biz(id))}</span>${EXT_IC}`)}</li>`
-        : `<li><a class="ch-link" href="#${id}" data-go="${id}"><i class="ch-led" aria-hidden="true"></i><span>${esc(biz(id))}</span></a></li>`,
-    )
-    .join('')
+  const menuLink = `<li><a class="ch-link" href="${esc(LINKS.menus.url)}" target="_blank" rel="noopener" data-menu-link aria-label="${esc(MENU_LINK.aria)}"><i class="ch-led" aria-hidden="true"></i><span>${esc(MENU_LINK.label)}</span>${EXT_IC}</a></li>`
+  const links =
+    menuLink +
+    NAV.filter(id => indexOf(id) >= 0)
+      .map(id => `<li><a class="ch-link" href="#${id}" data-go="${id}"><i class="ch-led" aria-hidden="true"></i><span>${esc(biz(id))}</span></a></li>`)
+      .join('')
 
   const sideA = Math.ceil(total / 2)
   const pips = slots
@@ -135,11 +136,9 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
     .map((s, i) => {
       const inner = `
           <span class="ch-ml-n" aria-hidden="true">${trackCode(i, total)}</span>
-          <span class="ch-ml-name" aria-hidden="true">${esc(biz(s.def.id, s.def.label))}${MENU_LINKS[s.def.id] ? EXT_IC : ''}</span>
-          <span class="ch-ml-lab" aria-hidden="true">${esc(MENU_LINKS[s.def.id] ?? s.def.label)}</span>`
-      return MENU_LINKS[s.def.id]
-        ? `<li>${menuLink(s.def.id, 'ch-ml', inner)}</li>`
-        : `<li><a class="ch-ml" href="#${s.def.id}" data-go="${s.def.id}" aria-label="${esc(biz(s.def.id, s.def.label))}, ${trackCode(i, total)}${extra(i) ? `: ${esc(extra(i))}` : ''}">${inner}
+          <span class="ch-ml-name" aria-hidden="true">${esc(biz(s.def.id, s.def.label))}</span>
+          <span class="ch-ml-lab" aria-hidden="true">${esc(s.def.label)}</span>`
+      return `<li><a class="ch-ml" href="#${s.def.id}" data-go="${s.def.id}" aria-label="${esc(biz(s.def.id, s.def.label))}, ${trackCode(i, total)}${extra(i) ? `: ${esc(extra(i))}` : ''}">${inner}
         </a></li>`
     })
     .join('')
@@ -188,7 +187,10 @@ export function createChrome(root: HTMLElement, engine: Engine, sound: Sound) {
       <div class="ch-menu-body">
         <nav class="ch-menu-nav" aria-label="Chapters"><ol class="ch-ml-list">${rows}</ol></nav>
         <div class="ch-menu-info">
-          ${reserve('ch-menu-cta')}
+          <div class="ch-menu-ctas">
+            ${reserve('ch-menu-cta')}
+            <a class="hud-btn hud-btn--ghost ch-menu-cta" href="${esc(LINKS.menus.url)}" target="_blank" rel="noopener" data-menu-link aria-label="${esc(MENU_LINK.aria)}"><span>${esc(MENU_LINK.cta)}</span>${EXT_IC}</a>
+          </div>
           <p class="ch-mi"><span class="ch-mi-k">Call</span><a href="${esc(BRAND.phoneHref)}">${esc(BRAND.phone)}</a></p>
           <p class="ch-mi"><span class="ch-mi-k">Find us</span><a href="${esc(BRAND.mapUrl)}" target="_blank" rel="noopener">${esc(BRAND.street)}<br>${esc(BRAND.city)}${NEW_TAB}</a></p>
           <div class="ch-mi ch-mi-hours">
