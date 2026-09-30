@@ -441,3 +441,51 @@ export const MICROCOPY = {
 }
 
 export const CREDIT = { text: 'Site concept by Hark Digital Design', url: 'https://hark.digital' }
+
+/** Kitchen chapter UI labels (descriptive, not claims). */
+export const KITCHEN_UI = {
+  /** the caption label over the photographed dish */
+  pass: 'On the pass',
+  hours: 'Kitchen Hours',
+}
+
+/** Last Call (visit) UI labels: plain, descriptive button and table names. */
+export const VISIT_UI = {
+  barHours: 'Bar hours',
+  kitchenHours: 'Kitchen hours',
+  order: 'Order for Pickup',
+  giftCards: 'Buy Gift Cards',
+  app: 'Mobile App',
+  untappd: 'Untappd',
+  backToTop: 'Back to top',
+}
+
+/** TAPS chapter UI labels (plain, descriptive — not business claims). */
+export const TAPS_UI = {
+  drafts: 'Drafts',
+  lastUpdate: 'Last Update',
+  /** the app button's label (BAR.app's own wording) */
+  appButton: 'See current Draft, Bottle and Cocktail Lists',
+  tap: 'Tap',
+}
+
+/** EVENTS chapter UI: the inquiry form's own note (gloryphilly.com Book an Event). */
+export const EVENTS_UI = {
+  required: 'All form fields are required.',
+}
+
+/** Hero chapter UI labels (plain descriptive, not claims). */
+export const HERO_UI = {
+  menu: 'See the menu',
+  /** the product-film caption during the pour */
+  pour: 'The first pour',
+}
+
+/** CELLAR chapter UI labels (plain, descriptive — not business claims). */
+export const CELLAR_UI = {
+  bottles: 'Bottles',
+  wine: 'Wine',
+  /** the wine card's heading (BAR.wine: "red, white and rosé" on tap) */
+  wineTitle: 'Red, white & rosé on tap',
+  cocktails: 'Specialty Cocktails',
+}

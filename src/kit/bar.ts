@@ -145,12 +145,138 @@ export function brickMap(): THREE.Texture {
   return brickTex
 }
 
-/** A brick wall plane facing +z, w × h world units, bricks at a real-ish scale. */
-export function makeBrickWall(w = 20, h = 10): THREE.Mesh {
-  const map = brickMap().clone()
-  map.needsUpdate = true
-  map.repeat.set(w / 2.4, h / 2.4)
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map, roughness: 0.92 }))
+/** A brick wall plane facing +z, w × h world units, bricks at a real-ish scale (mortar recessed by a bump). */
+export function makeBrickWall(w = 20, h = 10, { bump = 0.9, tint = '#ffffff' as THREE.ColorRepresentation } = {}): THREE.Mesh {
+  const map = brickMap()
+  const geo = new THREE.PlaneGeometry(w, h)
+  // scale the UVs (never clone the cached tile to change its repeat)
+  const uv = geo.attributes.uv as THREE.BufferAttribute
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, (uv.getX(i) * w) / 2.4, (uv.getY(i) * h) / 2.4)
+  const mat = new THREE.MeshStandardMaterial({
+    map,
+    color: tint,
+    roughness: 0.92,
+    bumpMap: map,
+    // the mortar is lighter than the brick: a negative scale sinks it
+    bumpScale: -bump,
+  })
+  const m = new THREE.Mesh(geo, mat)
   m.receiveShadow = true
   return m
+}
+
+// ─── stainless ───────────────────────────────────────────────────────────────
+
+/** Brushed stainless (taps, faucets, drip trays): long soft highlights from the studio strips. */
+export function stainless({ roughness = 0.24, color = '#b9bec2' as THREE.ColorRepresentation, env = 1 } = {}) {
+  return new THREE.MeshPhysicalMaterial({
+    color,
+    metalness: 1,
+    roughness,
+    anisotropy: 0.55,
+    envMapIntensity: env,
+  })
+}
+
+export interface Faucet {
+  group: THREE.Group
+  /** the nozzle's tip: where a pour stream starts (world position via getWorldPosition) */
+  spout: THREE.Object3D
+  /** the tap handle's pivot (rotation.x < 0 pulls it forward) */
+  handle: THREE.Group
+  /** 0 shut .. 1 pulled fully forward (pouring) */
+  setPull(k: number): void
+  dispose(): void
+}
+
+/**
+ * A stainless beer faucet on a short shank, spout down, a tall black handle
+ * with a steel ferrule on top. Built facing +z (the shank runs from the tower
+ * face at the origin toward +z). Units match makeGlass (scale them together).
+ */
+export function makeFaucet({ scale = 1, handleColor = '#141010' as THREE.ColorRepresentation } = {}): Faucet {
+  const group = new THREE.Group()
+  const steel = stainless()
+  const dark = new THREE.MeshPhysicalMaterial({ color: handleColor, roughness: 0.38, clearcoat: 0.6, clearcoatRoughness: 0.3, envMapIntensity: 0.8 })
+  const geos: THREE.BufferGeometry[] = []
+  const add = (geo: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Object3D = group) => {
+    geos.push(geo)
+    const m = new THREE.Mesh(geo, mat)
+    m.castShadow = true
+    parent.add(m)
+    return m
+  }
+  // flange on the tower face, the shank, the body
+  const flange = add(new THREE.CylinderGeometry(0.09, 0.1, 0.03, 40), steel)
+  flange.rotation.x = Math.PI / 2
+  flange.position.z = 0.015
+  const shank = add(new THREE.CylinderGeometry(0.032, 0.034, 0.3, 32), steel)
+  shank.rotation.x = Math.PI / 2
+  shank.position.z = 0.17
+  // the faucet body: a lathed barrel lying along z
+  const bodyPts = [
+    [0.0, -0.1], [0.05, -0.1], [0.062, -0.085], [0.066, -0.02], [0.064, 0.06], [0.058, 0.1], [0.0, 0.11],
+  ].map(([x, y]) => new THREE.Vector2(x, y))
+  const body = add(new THREE.LatheGeometry(bodyPts, 40), steel)
+  body.rotation.x = Math.PI / 2
+  body.position.z = 0.4
+  // the coupling nut
+  const nut = add(new THREE.CylinderGeometry(0.05, 0.05, 0.05, 6), steel)
+  nut.rotation.x = Math.PI / 2
+  nut.position.z = 0.29
+  // the spout: down from the front of the body, a slight flare at the nozzle
+  const spoutPts = [
+    [0.0, 0.0], [0.022, 0.0], [0.026, 0.01], [0.024, 0.05], [0.028, 0.14], [0.034, 0.18], [0.036, 0.2], [0.0, 0.2],
+  ].map(([x, y]) => new THREE.Vector2(x, y))
+  const sp = add(new THREE.LatheGeometry(spoutPts, 32), steel)
+  sp.rotation.x = Math.PI
+  sp.position.set(0, -0.02, 0.44)
+  const spout = new THREE.Object3D()
+  spout.position.set(0, -0.225, 0.44)
+  group.add(spout)
+  // the handle: lever pivot on top of the body; a steel collar + ferrule, the black tapered handle
+  const handle = new THREE.Group()
+  handle.position.set(0, 0.06, 0.4)
+  group.add(handle)
+  add(new THREE.CylinderGeometry(0.03, 0.036, 0.07, 24).translate(0, 0.035, 0), steel, handle)
+  add(new THREE.CylinderGeometry(0.036, 0.03, 0.05, 24).translate(0, 0.095, 0), steel, handle)
+  const hPts = [
+    [0.0, 0.0], [0.034, 0.0], [0.038, 0.06], [0.05, 0.3], [0.056, 0.44], [0.05, 0.47], [0.0, 0.48],
+  ].map(([x, y]) => new THREE.Vector2(x, y))
+  add(new THREE.LatheGeometry(hPts, 32).translate(0, 0.12, 0), dark, handle)
+  group.scale.setScalar(scale)
+  return {
+    group,
+    spout,
+    handle,
+    setPull(k) {
+      handle.rotation.x = k * 0.45
+    },
+    dispose() {
+      for (const g of geos) g.dispose()
+      steel.dispose()
+      dark.dispose()
+    },
+  }
+}
+
+/** A stainless drip tray with a slotted grate, top at y = 0 (w × d). */
+export function makeDripTray(w = 1.6, d = 0.7): THREE.Group {
+  const g = new THREE.Group()
+  const steel = stainless({ roughness: 0.4, color: '#8d9296', env: 0.7 })
+  const tray = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, d), steel)
+  tray.position.y = -0.025
+  tray.receiveShadow = true
+  g.add(tray)
+  const slots = Math.round(w / 0.06)
+  const slotGeo = new THREE.BoxGeometry(0.018, 0.012, d * 0.8)
+  const slotMat = new THREE.MeshStandardMaterial({ color: '#050404', roughness: 0.6 })
+  const inst = new THREE.InstancedMesh(slotGeo, slotMat, slots)
+  const m = new THREE.Matrix4()
+  for (let i = 0; i < slots; i++) {
+    m.makeTranslation(-w / 2 + 0.08 + ((w - 0.16) * i) / (slots - 1), -0.004, 0)
+    inst.setMatrixAt(i, m)
+  }
+  g.add(inst)
+  return g
 }

@@ -1,0 +1,247 @@
+/* HERO — "This Must Be the Place". Everything scoped under .hero-stage. */
+
+.hero-stage .hero-copy {
+  position: absolute;
+  left: var(--gutter);
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  width: min(46vw, 640px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  will-change: opacity, transform;
+}
+
+/* a soft dark scrim behind the type (no backdrop-filter over the canvas) */
+.hero-stage .hero-copy::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: calc(-1 * var(--gutter));
+  right: -18%;
+  top: -12%;
+  bottom: -12%;
+  background: radial-gradient(ellipse 70% 60% at 30% 50%, rgba(10, 6, 4, 0.72), rgba(10, 6, 4, 0.4) 60%, rgba(10, 6, 4, 0) 100%);
+  pointer-events: none;
+}
+
+.hero-stage .hero-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 4px 0 2px;
+}
+
+/* GLORY: the painted slab of the wall sign, huge */
+.hero-stage .hero-glory {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(4.6rem, 13.2vw, 12.5rem);
+  line-height: 0.82;
+  letter-spacing: 0.005em;
+  text-transform: uppercase;
+  color: var(--paper);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.25), 0 10px 40px rgba(0, 0, 0, 0.45);
+  margin-left: -0.04em;
+}
+
+/* the sign's plate: "BEER BAR & KITCHEN" inside a painted hairline box */
+.hero-stage .hero-plate {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.42em 0.8em 0.36em;
+  border: 2px solid rgba(243, 234, 216, 0.82);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 4px rgba(10, 6, 4, 0.5), inset 0 0 0 5px rgba(243, 234, 216, 0.28);
+}
+.hero-stage .hero-bbk {
+  font-family: var(--font-display);
+  font-size: clamp(1.05rem, 2.3vw, 2.1rem);
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper);
+  white-space: nowrap;
+}
+
+.hero-stage .hero-tag {
+  color: var(--paper);
+  font-size: clamp(16px, 1.3vw, 19px);
+  max-width: 34ch;
+}
+.hero-stage .hero-addr {
+  color: var(--fg-muted);
+}
+.hero-stage .hero-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+/* during the pour: a compact caption bottom-left (the tagline stays) */
+.hero-stage .hero-pourcap {
+  position: absolute;
+  left: var(--gutter);
+  bottom: var(--safe-bottom);
+  max-width: min(420px, 40vw);
+  padding: 16px 20px 18px;
+  background: var(--panel);
+  border-left: 3px solid var(--glory);
+  border-radius: 2px;
+  visibility: hidden;
+  opacity: 0;
+}
+.hero-stage .hero-pourcap p {
+  margin: 0;
+}
+.hero-stage .hero-pourcap-name {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--paper);
+  margin: 8px 0 8px !important;
+}
+.hero-stage .hero-pourcap-tag {
+  font-size: 15px;
+  color: var(--fg-muted);
+}
+
+/* the payoff: the motto returns with the CTAs */
+.hero-stage .hero-payoff {
+  position: absolute;
+  left: var(--gutter);
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  width: min(48vw, 680px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  visibility: hidden;
+  opacity: 0;
+}
+.hero-stage .hero-payoff::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: calc(-1 * var(--gutter));
+  right: -14%;
+  top: -10%;
+  bottom: -10%;
+  background: radial-gradient(ellipse 70% 60% at 30% 50%, rgba(10, 6, 4, 0.7), rgba(10, 6, 4, 0.35) 60%, rgba(10, 6, 4, 0) 100%);
+  pointer-events: none;
+}
+.hero-stage .hero-motto {
+  font-size: clamp(2.8rem, 6vw, 6.2rem);
+  max-width: 11ch;
+}
+
+/* ---------------- tablet / portrait: glass above, copy below ---------------- */
+@media (max-aspect-ratio: 5/4) {
+  .hero-stage .hero-copy,
+  .hero-stage .hero-payoff {
+    top: auto;
+    width: auto;
+    right: var(--gutter);
+    justify-content: flex-end;
+    gap: 12px;
+  }
+  .hero-stage .hero-copy::before,
+  .hero-stage .hero-payoff::before {
+    left: calc(-1 * var(--gutter));
+    right: calc(-1 * var(--gutter));
+    top: -30%;
+    bottom: -40%;
+    background: linear-gradient(180deg, rgba(10, 6, 4, 0) 0%, rgba(10, 6, 4, 0.66) 30%, rgba(10, 6, 4, 0.86) 100%);
+  }
+  .hero-stage .hero-glory {
+    font-size: clamp(4.2rem, 21vw, 9rem);
+  }
+  .hero-stage .hero-bbk {
+    font-size: clamp(0.95rem, 4.2vw, 1.6rem);
+  }
+  .hero-stage .hero-pourcap {
+    max-width: none;
+    right: var(--gutter);
+  }
+  .hero-stage .hero-motto {
+    font-size: clamp(2.4rem, 11vw, 4.4rem);
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-stage .hero-name {
+    gap: 10px;
+  }
+  .hero-stage .hero-tag {
+    font-size: 15px;
+  }
+  .hero-stage .hero-ctas .hud-btn {
+    padding: 12px 16px;
+    font-size: 11px;
+  }
+  .hero-stage .hero-pourcap {
+    padding: 12px 14px 14px;
+  }
+  .hero-stage .hero-pourcap-name {
+    font-size: 1.5rem;
+  }
+}
+
+/* short phones (375×667): tighter */
+@media (max-width: 480px) and (max-height: 700px) {
+  .hero-stage .hero-glory {
+    font-size: 4rem;
+  }
+  .hero-stage .hero-copy {
+    gap: 9px;
+  }
+  .hero-stage .hero-addr {
+    display: none;
+  }
+}
+
+/* short landscape: one compact column on the left, the glass on the right */
+@media (orientation: landscape) and (max-height: 500px) {
+  .hero-stage .hero-copy,
+  .hero-stage .hero-payoff {
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+    width: 50vw;
+    gap: 8px;
+  }
+  .hero-stage .hero-glory {
+    font-size: 3.6rem;
+  }
+  .hero-stage .hero-bbk {
+    font-size: 0.95rem;
+  }
+  .hero-stage .hero-tag {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .hero-stage .hero-addr {
+    display: none;
+  }
+  .hero-stage .hero-ctas .hud-btn {
+    padding: 10px 14px;
+    font-size: 10.5px;
+  }
+  .hero-stage .hero-motto {
+    font-size: 2.4rem;
+  }
+  .hero-stage .hero-pourcap {
+    bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+    padding: 10px 14px;
+  }
+  .hero-stage .hero-pourcap-name {
+    font-size: 1.3rem;
+  }
+  .hero-stage .hero-pourcap-tag {
+    font-size: 13px;
+  }
+}

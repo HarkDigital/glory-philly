@@ -1,0 +1,612 @@
+/* ---------------- Last Call (visit) — the card by the window ----------------
+   Landscape: the card on the left, the window + sign on the right.
+   Portrait: the scene on top, the card stacked under it (fits 375x667).
+   Short landscape: a wide two-column card. */
+
+.stage-visit .vs-wrap {
+  position: absolute;
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  left: var(--gutter);
+  right: var(--gutter);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.stage-visit .vs-card {
+  --vs-gap: clamp(12px, 2vh, 20px);
+  position: relative;
+  width: clamp(360px, 33vw, 470px);
+  max-height: 100%;
+  padding: clamp(18px, 2.6vh, 28px) clamp(20px, 2vw, 30px) clamp(16px, 2.2vh, 24px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--vs-gap);
+  background: rgba(14, 9, 7, 0.9);
+  opacity: 0;
+  visibility: hidden;
+  transform: translate3d(0, 14px, 0);
+  transition:
+    opacity 0.45s ease,
+    transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 0.45s;
+}
+.stage-visit .vs-card.is-in {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 0.45s ease,
+    transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 0s;
+}
+
+/* ---- headline + the red G stamp ---- */
+.stage-visit .vs-head {
+  position: relative;
+  padding-right: 64px;
+}
+.stage-visit .vs-eyebrow {
+  margin-bottom: clamp(8px, 1.3vh, 14px);
+}
+.stage-visit .vs-title {
+  font-size: clamp(1.9rem, 2.75vw, 2.9rem);
+  line-height: 1;
+}
+.stage-visit .vs-stamp {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  transform: rotate(-8deg);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* ---- blocks fade in, in order (settles < 0.8 s) ---- */
+.stage-visit .vs-block {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0);
+  transition:
+    opacity 0.3s ease,
+    transform 0.3s ease;
+}
+.stage-visit .vs-block.is-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.45s ease calc(var(--d, 0) * 70ms + 60ms),
+    transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) calc(var(--d, 0) * 70ms + 60ms);
+}
+
+/* ---- phone, address, email ---- */
+.stage-visit .vs-reach {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: var(--vs-gap);
+  border-top: 1px solid var(--line);
+}
+.stage-visit .vs-phone {
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 2.4vw, 2.5rem);
+  line-height: 1;
+  color: var(--paper);
+  text-decoration: none;
+  letter-spacing: 0.01em;
+  align-self: flex-start;
+}
+.stage-visit .vs-phone:hover,
+.stage-visit .vs-phone:focus-visible {
+  color: var(--amber-hot);
+}
+.stage-visit .vs-addr {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.4em;
+  align-self: flex-start;
+  font-size: clamp(15px, 1.15vw, 17px);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--paper);
+  text-decoration: underline;
+  text-decoration-color: rgba(243, 234, 216, 0.35);
+  text-underline-offset: 3px;
+}
+.stage-visit .vs-addr:hover,
+.stage-visit .vs-addr:focus-visible {
+  text-decoration-color: var(--signal);
+}
+.stage-visit .vs-addr svg,
+.stage-visit .hud-btn svg,
+.stage-visit .vs-top svg {
+  width: 0.8em;
+  height: 0.8em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.stage-visit .vs-mail {
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+.stage-visit .vs-mail:hover,
+.stage-visit .vs-mail:focus-visible {
+  color: var(--paper);
+  text-decoration: underline;
+}
+
+/* ---- hours: two tables side by side ---- */
+.stage-visit .vs-hours {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr);
+  column-gap: clamp(14px, 1.6vw, 24px);
+}
+.stage-visit .vs-hlabel {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--amber-hot);
+}
+.stage-visit .vs-hrows {
+  margin: 0;
+}
+.stage-visit .vs-hrow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.stage-visit .vs-hrow dt {
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.stage-visit .vs-hrow dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--paper);
+  white-space: nowrap;
+}
+.stage-visit .vs-bar-full {
+  display: none;
+}
+/* tall screens have room for every day of the week */
+@media (orientation: landscape) and (min-height: 1000px) {
+  .stage-visit .vs-bar-full {
+    display: block;
+  }
+  .stage-visit .vs-bar-short {
+    display: none;
+  }
+}
+
+/* ---- reservations + the other ways in ---- */
+.stage-visit .vs-ctas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.stage-visit .vs-reserve {
+  justify-content: center;
+  padding: 15px 22px;
+  font-size: 12.5px;
+}
+.stage-visit .vs-more {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.stage-visit .vs-sub {
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  min-width: 0;
+}
+.stage-visit .vs-sub span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stage-visit .vs-note {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+.stage-visit .vs-note a {
+  color: var(--paper);
+  text-underline-offset: 2px;
+}
+
+/* ---- socials ---- */
+.stage-visit .vs-social {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+.stage-visit .vs-soc {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  text-decoration: none;
+  font-size: 13px;
+  color: var(--paper);
+}
+.stage-visit .vs-soc-name {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stage-visit .vs-soc-handle {
+  text-decoration: underline;
+  text-decoration-color: rgba(243, 234, 216, 0.3);
+  text-underline-offset: 3px;
+}
+.stage-visit .vs-soc:hover .vs-soc-handle,
+.stage-visit .vs-soc:focus-visible .vs-soc-handle {
+  text-decoration-color: var(--signal);
+}
+
+/* ---- footer ---- */
+.stage-visit .vs-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: calc(var(--vs-gap) * 0.7);
+  border-top: 1px solid var(--line);
+}
+.stage-visit .vs-legal {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+.stage-visit .vs-credit {
+  color: var(--fg-muted);
+  text-underline-offset: 2px;
+}
+.stage-visit .vs-credit:hover,
+.stage-visit .vs-credit:focus-visible {
+  color: var(--paper);
+}
+.stage-visit .vs-top {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper);
+  cursor: pointer;
+}
+.stage-visit .vs-top:hover,
+.stage-visit .vs-top:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(243, 230, 204, 0.8);
+}
+
+/* ---- shorter desktop screens: grouped bar hours, no email line ---- */
+@media (max-height: 860px) {
+  .stage-visit .vs-card {
+    --vs-gap: clamp(10px, 1.7vh, 16px);
+  }
+}
+@media (max-height: 800px) and (orientation: landscape) {
+  .stage-visit .vs-card {
+    --vs-gap: 10px;
+  }
+  .stage-visit .vs-title {
+    font-size: clamp(1.5rem, 2.25vw, 1.9rem);
+    white-space: nowrap;
+  }
+  .stage-visit .vs-stamp {
+    width: 44px;
+    height: 44px;
+  }
+  .stage-visit .vs-head {
+    padding-right: 50px;
+  }
+  .stage-visit .vs-phone {
+    font-size: clamp(1.5rem, 2.1vw, 2rem);
+  }
+  .stage-visit .vs-mail {
+    display: none;
+  }
+  .stage-visit .vs-hrow {
+    padding: 2px 0;
+  }
+  .stage-visit .vs-note {
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .stage-visit .vs-legal {
+    font-size: 10.5px;
+  }
+  .stage-visit .vs-reserve {
+    padding: 13px 20px;
+  }
+  .stage-visit .vs-sub {
+    padding: 8px 12px;
+  }
+}
+
+/* a narrow card: the secondary buttons drop their arrows so every label fits */
+@media (max-width: 1180px) and (orientation: landscape) {
+  .stage-visit .vs-sub svg {
+    display: none;
+  }
+  .stage-visit .vs-sub {
+    justify-content: center;
+  }
+}
+
+/* ---- portrait (phones, tall tablets): scene on top, the card stacked under it ---- */
+@media (orientation: portrait), (max-width: 700px) and (min-height: 501px) {
+  .stage-visit .vs-wrap {
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .stage-visit .vs-card {
+    width: 100%;
+    max-width: 560px;
+  }
+  .stage-visit .vs-bar-full {
+    display: none;
+  }
+  .stage-visit .vs-bar-short {
+    display: block;
+  }
+}
+@media (orientation: portrait) and (max-width: 560px) {
+  .stage-visit .vs-wrap {
+    left: max(12px, env(safe-area-inset-left, 0px));
+    right: max(12px, env(safe-area-inset-right, 0px));
+    bottom: calc(var(--safe-bottom) - 10px);
+  }
+  .stage-visit .vs-card {
+    --vs-gap: 10px;
+    padding: 14px 16px 12px;
+    border-radius: 8px;
+  }
+  .stage-visit .vs-head {
+    padding-right: 46px;
+  }
+  .stage-visit .vs-eyebrow {
+    margin-bottom: 6px;
+  }
+  .stage-visit .vs-title {
+    font-size: clamp(1.45rem, 7vw, 1.9rem);
+  }
+  .stage-visit .vs-stamp {
+    width: 42px;
+    height: 42px;
+    top: -2px;
+    right: -2px;
+  }
+  .stage-visit .vs-reach {
+    gap: 3px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: end;
+    column-gap: 14px;
+  }
+  .stage-visit .vs-phone {
+    font-size: 1.35rem;
+    grid-column: 1 / -1;
+  }
+  .stage-visit .vs-addr {
+    font-size: 13.5px;
+    grid-column: 1 / -1;
+  }
+  .stage-visit .vs-mail {
+    display: none;
+  }
+  .stage-visit .vs-hlabel {
+    font-size: 10px;
+    margin-bottom: 3px;
+  }
+  .stage-visit .vs-hrow {
+    padding: 2px 0;
+    font-size: 11.5px;
+  }
+  .stage-visit .vs-hrow dd {
+    font-size: 10.5px;
+  }
+  .stage-visit .vs-hours {
+    column-gap: 12px;
+  }
+  .stage-visit .vs-ctas {
+    gap: 7px;
+  }
+  .stage-visit .vs-reserve {
+    padding: 11px 16px;
+    font-size: 11.5px;
+  }
+  .stage-visit .vs-more {
+    gap: 6px;
+  }
+  .stage-visit .vs-sub {
+    padding: 7px 11px;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+  }
+  .stage-visit .vs-note {
+    font-size: 11.5px;
+    line-height: 1.35;
+    margin: 0;
+  }
+  .stage-visit .vs-soc {
+    font-size: 12px;
+  }
+  .stage-visit .vs-soc-name {
+    font-size: 9.5px;
+  }
+  .stage-visit .vs-legal {
+    font-size: 10.5px;
+  }
+  .stage-visit .vs-top {
+    padding: 7px 11px;
+    font-size: 9.5px;
+  }
+}
+/* very short phones (375x667 and the like): tighter still */
+@media (orientation: portrait) and (max-width: 560px) and (max-height: 740px) {
+  .stage-visit .vs-card {
+    --vs-gap: 8px;
+    padding: 12px 14px 10px;
+  }
+  .stage-visit .vs-title {
+    font-size: 1.4rem;
+  }
+  .stage-visit .vs-phone {
+    font-size: 1.2rem;
+  }
+  .stage-visit .vs-hrow {
+    padding: 1px 0;
+  }
+}
+
+/* ---- short landscape (phones sideways, 200% zoom): a wide two-column card ---- */
+@media (orientation: landscape) and (max-height: 500px) {
+  .stage-visit .vs-card {
+    --vs-gap: 8px;
+    width: min(70vw, 640px);
+    padding: 10px 14px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      'head hours'
+      'reach hours'
+      'ctas social'
+      'ctas foot';
+    column-gap: 18px;
+    row-gap: 6px;
+    align-content: start;
+  }
+  .stage-visit .vs-head {
+    grid-area: head;
+    padding-right: 40px;
+  }
+  .stage-visit .vs-reach {
+    grid-area: reach;
+  }
+  .stage-visit .vs-ctas {
+    grid-area: ctas;
+  }
+  .stage-visit .vs-hours {
+    grid-area: hours;
+  }
+  .stage-visit .vs-social {
+    grid-area: social;
+    align-self: start;
+    padding-top: 4px;
+  }
+  .stage-visit .vs-foot {
+    grid-area: foot;
+    align-self: end;
+  }
+  .stage-visit .vs-eyebrow {
+    margin-bottom: 4px;
+  }
+  .stage-visit .vs-title {
+    font-size: 1.25rem;
+  }
+  .stage-visit .vs-stamp {
+    width: 34px;
+    height: 34px;
+  }
+  .stage-visit .vs-reach {
+    padding-top: 6px;
+    gap: 2px;
+  }
+  .stage-visit .vs-phone {
+    font-size: 1.15rem;
+  }
+  .stage-visit .vs-addr {
+    font-size: 12px;
+  }
+  .stage-visit .vs-mail {
+    display: none;
+  }
+  .stage-visit .vs-ctas {
+    gap: 5px;
+  }
+  .stage-visit .vs-reserve {
+    padding: 8px 12px;
+    font-size: 10.5px;
+  }
+  .stage-visit .vs-more {
+    gap: 5px;
+  }
+  .stage-visit .vs-sub {
+    padding: 5px 9px;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+  }
+  .stage-visit .vs-sub svg {
+    display: none;
+  }
+  .stage-visit .vs-note {
+    font-size: 10.5px;
+    line-height: 1.3;
+  }
+  .stage-visit .vs-hours {
+    column-gap: 10px;
+  }
+  .stage-visit .vs-hlabel {
+    font-size: 9.5px;
+    margin-bottom: 2px;
+  }
+  .stage-visit .vs-hrow {
+    padding: 1px 0;
+    font-size: 11px;
+  }
+  .stage-visit .vs-hrow dd {
+    font-size: 10px;
+  }
+  .stage-visit .vs-soc {
+    font-size: 11px;
+  }
+  .stage-visit .vs-soc-name {
+    font-size: 9px;
+  }
+  .stage-visit .vs-foot {
+    padding-top: 5px;
+    gap: 8px;
+  }
+  .stage-visit .vs-legal {
+    font-size: 10px;
+  }
+  .stage-visit .vs-top {
+    padding: 5px 9px;
+    font-size: 9px;
+  }
+}
